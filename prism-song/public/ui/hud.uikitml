@@ -1,0 +1,197 @@
+<!--
+  Prism Song HUD. Two sections share one panel: #play (current puzzle) and
+  #menu (puzzle select). Only one is displayed at a time; src/ui/hud.ts
+  toggles them and fills the text.
+-->
+<style>
+  .root {
+    flex-direction: column;
+    width: 380px;
+    padding-bottom: 14px;
+  }
+
+  .section {
+    flex-direction: column;
+    padding-top: 16px;
+    padding-left: 22px;
+    padding-right: 22px;
+  }
+
+  .eyebrow {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: #6b6f7a;
+  }
+
+  .eyebrow:dark {
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .title {
+    margin-top: 4px;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: #1d1f24;
+  }
+
+  .title:dark {
+    color: rgba(255, 255, 255, 0.95);
+  }
+
+  .status {
+    margin-top: 8px;
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.3;
+    color: #3a3d45;
+  }
+
+  .status:dark {
+    color: rgba(255, 255, 255, 0.82);
+  }
+
+  .meter {
+    flex-direction: row;
+    gap: 6px;
+    margin-top: 12px;
+    height: 6px;
+  }
+
+  .meter-dot {
+    width: 30px;
+    height: 6px;
+    border-radius: 3px;
+    background-color: #c9ccd4;
+  }
+
+  .row {
+    flex-direction: row;
+    gap: 8px;
+    margin-top: 14px;
+    padding-left: 22px;
+    padding-right: 22px;
+  }
+
+  .grid-row {
+    flex-direction: row;
+    gap: 6px;
+    margin-top: 6px;
+  }
+
+  .movement-label {
+    margin-top: 12px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    color: #6b6f7a;
+  }
+
+  .movement-label:dark {
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .cell-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 18px;
+    align-items: center;
+    justify-content: center;
+    background-color: #e4e6eb;
+    cursor: pointer;
+  }
+
+  .cell-label {
+    font-size: 14px;
+    font-weight: 700;
+    color: #2a2d33;
+  }
+
+  .button-label {
+    transform-translate-y: 1px;
+  }
+</style>
+<Panel class="root">
+  <div id="play" class="section">
+    <div id="hud-eyebrow" class="eyebrow">I. DAWN - 1 / 8</div>
+    <div id="hud-title" class="title">First Light</div>
+    <div id="hud-status" class="status">Guide the light into the crystal.</div>
+    <div class="meter">
+      <div id="meter-0" class="meter-dot"></div>
+      <div id="meter-1" class="meter-dot"></div>
+      <div id="meter-2" class="meter-dot"></div>
+      <div id="meter-3" class="meter-dot"></div>
+      <div id="meter-4" class="meter-dot"></div>
+    </div>
+  </div>
+  <div id="play-actions" class="row">
+    <Button id="btn-reset" variant="secondary" size="sm">
+      <ButtonIcon><RotateCcw></RotateCcw></ButtonIcon>
+      <ButtonLabel class="button-label">Reset</ButtonLabel>
+    </Button>
+    <Button id="btn-hint" variant="secondary" size="sm">
+      <ButtonIcon><Lightbulb></Lightbulb></ButtonIcon>
+      <ButtonLabel class="button-label">Hint</ButtonLabel>
+    </Button>
+    <Button id="btn-menu" variant="secondary" size="sm">
+      <ButtonIcon><LayoutGrid></LayoutGrid></ButtonIcon>
+      <ButtonLabel class="button-label">Puzzles</ButtonLabel>
+    </Button>
+    <Button id="btn-next" size="sm">
+      <ButtonLabel class="button-label">Next</ButtonLabel>
+      <ButtonIcon><ChevronRight></ChevronRight></ButtonIcon>
+    </Button>
+  </div>
+
+  <div id="menu" class="section" style="display: none">
+    <div class="eyebrow">PRISM SONG</div>
+    <div class="title">Choose a puzzle</div>
+    <div id="menu-0-label" class="movement-label">I. DAWN</div>
+    <div class="grid-row">
+      <div id="lvl-0" class="cell-btn"><div id="lvl-0-t" class="cell-label">1</div></div>
+      <div id="lvl-1" class="cell-btn"><div id="lvl-1-t" class="cell-label">2</div></div>
+      <div id="lvl-2" class="cell-btn"><div id="lvl-2-t" class="cell-label">3</div></div>
+      <div id="lvl-3" class="cell-btn"><div id="lvl-3-t" class="cell-label">4</div></div>
+      <div id="lvl-4" class="cell-btn"><div id="lvl-4-t" class="cell-label">5</div></div>
+      <div id="lvl-5" class="cell-btn"><div id="lvl-5-t" class="cell-label">6</div></div>
+      <div id="lvl-6" class="cell-btn"><div id="lvl-6-t" class="cell-label">7</div></div>
+      <div id="lvl-7" class="cell-btn"><div id="lvl-7-t" class="cell-label">8</div></div>
+    </div>
+    <div id="menu-1-label" class="movement-label">II. NOON</div>
+    <div class="grid-row">
+      <div id="lvl-8" class="cell-btn"><div id="lvl-8-t" class="cell-label">1</div></div>
+      <div id="lvl-9" class="cell-btn"><div id="lvl-9-t" class="cell-label">2</div></div>
+      <div id="lvl-10" class="cell-btn"><div id="lvl-10-t" class="cell-label">3</div></div>
+      <div id="lvl-11" class="cell-btn"><div id="lvl-11-t" class="cell-label">4</div></div>
+      <div id="lvl-12" class="cell-btn"><div id="lvl-12-t" class="cell-label">5</div></div>
+      <div id="lvl-13" class="cell-btn"><div id="lvl-13-t" class="cell-label">6</div></div>
+      <div id="lvl-14" class="cell-btn"><div id="lvl-14-t" class="cell-label">7</div></div>
+      <div id="lvl-15" class="cell-btn"><div id="lvl-15-t" class="cell-label">8</div></div>
+    </div>
+    <div id="menu-2-label" class="movement-label">III. DUSK</div>
+    <div class="grid-row">
+      <div id="lvl-16" class="cell-btn"><div id="lvl-16-t" class="cell-label">1</div></div>
+      <div id="lvl-17" class="cell-btn"><div id="lvl-17-t" class="cell-label">2</div></div>
+      <div id="lvl-18" class="cell-btn"><div id="lvl-18-t" class="cell-label">3</div></div>
+      <div id="lvl-19" class="cell-btn"><div id="lvl-19-t" class="cell-label">4</div></div>
+      <div id="lvl-20" class="cell-btn"><div id="lvl-20-t" class="cell-label">5</div></div>
+      <div id="lvl-21" class="cell-btn"><div id="lvl-21-t" class="cell-label">6</div></div>
+      <div id="lvl-22" class="cell-btn"><div id="lvl-22-t" class="cell-label">7</div></div>
+      <div id="lvl-23" class="cell-btn"><div id="lvl-23-t" class="cell-label">8</div></div>
+    </div>
+  </div>
+  <div id="menu-actions" class="row" style="display: none">
+    <Button id="btn-daily" size="sm">
+      <ButtonIcon><CalendarDays></CalendarDays></ButtonIcon>
+      <ButtonLabel id="btn-daily-label" class="button-label">Daily Chord</ButtonLabel>
+    </Button>
+    <Button id="btn-sound" variant="secondary" size="sm">
+      <ButtonIcon><Volume2></Volume2></ButtonIcon>
+      <ButtonLabel id="btn-sound-label" class="button-label">Sound on</ButtonLabel>
+    </Button>
+    <Button id="btn-back" variant="secondary" size="sm">
+      <ButtonLabel class="button-label">Back</ButtonLabel>
+    </Button>
+  </div>
+</Panel>
