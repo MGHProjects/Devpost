@@ -15,7 +15,7 @@ const lessons: LevelDef[] = [
     id: 'dawn-1',
     name: 'First Light',
     size: 5,
-    hint: 'Pinch the mirror and twist your wrist to turn it.',
+    hint: 'Pinch the brass mirror and twist your wrist to turn it. (Or just tap it.)',
     board: [
       { kind: 'emitter', x: 0, y: 2, rot: 0, color: C },
       { kind: 'mirror', x: 2, y: 2, rot: 0, lock: 'rotate' },
@@ -28,7 +28,7 @@ const lessons: LevelDef[] = [
     id: 'dawn-2',
     name: 'Placing',
     size: 5,
-    hint: 'Pinch a mirror from the tray and set it down in the light.',
+    hint: 'Pinch the mirror in the tray and set it down in the light, then turn it.',
     board: [
       { kind: 'emitter', x: 0, y: 1, rot: 0, color: R },
       { kind: 'target', x: 3, y: 4, color: R },

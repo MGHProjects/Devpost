@@ -40,11 +40,13 @@ import {
   trace,
 } from './game/trace.js';
 import { Color, LevelDef, Piece, colorName, isRotatable, mod8 } from './game/types.js';
+import { TableAnchor } from './input/anchor.js';
 import { HandState, HandTracker, twistAngle } from './input/hands.js';
 import { BeamRenderer } from './render/beams.js';
 import { BoardView } from './render/board.js';
 import { lightColor } from './render/palette.js';
 import { PieceView } from './render/pieces.js';
+import { Sparkles } from './render/sparkles.js';
 import { Hud } from './ui/hud.js';
 
 const FLAT_LEVELS: { level: LevelDef; movement: number; index: number }[] = CAMPAIGN.flatMap(
@@ -102,6 +104,7 @@ export class GameSystem extends createSystem({}) {
   private board: BoardView | null = null;
   private boardEntity: Entity | null = null;
   private beams: BeamRenderer | null = null;
+  private sparkles: Sparkles | null = null;
   private entities: Entity[] = [];
   private views = new Map<number, PieceView>();
 
@@ -127,7 +130,13 @@ export class GameSystem extends createSystem({}) {
   private gazeSung = new Set<number>();
 
   private hint: { view: PieceView; until: number } | null = null;
+  private idle = 0;
+  private autoHinted = false;
   private placedInXR = false;
+  private table = new TableAnchor();
+  private anchorChecked = false;
+  private anchorPos = new Vector3();
+  private anchorQuat = new Quaternion();
   private boost = 0;
 
   // Scratch objects (no per-frame allocation).
@@ -146,6 +155,7 @@ export class GameSystem extends createSystem({}) {
     this.boardRoot.name = 'board-root';
     this.boardRootEntity = this.world.createTransformEntity(this.boardRoot, { persistent: true });
     this.audio.setMuted(this.progress.muted);
+    this.audio.clock = () => this.time;
 
     this.hud = new Hud(this.world, {
       reset: () => this.withSound(() => this.resetLevel()),
@@ -170,9 +180,19 @@ export class GameSystem extends createSystem({}) {
         this.world.scene.background = immersive ? null : this.backdrop;
         if (immersive) {
           this.audio.unlock();
-          if (!this.placedInXR) this.pendingPlacement = true;
+          if (!this.placedInXR) {
+            this.pendingPlacement = true;
+            this.anchorChecked = false;
+            void this.table.restore(this.world.session).then((found) => {
+              if (!found) {
+                this.anchorChecked = true;
+                this.wantAnchor = true;
+              }
+            });
+          }
         } else {
           this.placedInXR = false;
+          this.table.reset();
           this.layoutDesktop();
         }
       }),
@@ -185,6 +205,7 @@ export class GameSystem extends createSystem({}) {
   }
 
   private pendingPlacement = false;
+  private wantAnchor = false;
   private backdrop = new ThreeColor(0x0b0e16);
 
   private withSound(fn: () => void): void {
@@ -233,6 +254,8 @@ export class GameSystem extends createSystem({}) {
     this.selected = null;
     this.pendingTap = null;
     this.firstMove = true;
+    this.idle = 0;
+    this.autoHinted = false;
     this.gazeSung.clear();
     this.setMenu(false);
 
@@ -244,6 +267,8 @@ export class GameSystem extends createSystem({}) {
     this.entities.push(this.boardEntity);
     this.beams = new BeamRenderer(board.cell, level.size, board.cell * 0.3);
     board.group.add(this.beams.group);
+    this.sparkles = new Sparkles(board.cell);
+    board.group.add(this.sparkles.group);
 
     const surface = this.world.createTransformEntity(board.surface, {
       parent: this.boardEntity,
@@ -314,6 +339,8 @@ export class GameSystem extends createSystem({}) {
     for (const v of this.views.values()) v.dispose();
     this.views.clear();
     this.beams?.dispose();
+    this.sparkles?.dispose();
+    this.sparkles = null;
     this.board?.dispose();
     this.board = null;
     this.beams = null;
@@ -342,11 +369,7 @@ export class GameSystem extends createSystem({}) {
     const today = daySeed(new Date());
     const dailyDone = this.progress.lastDaily === today;
     const streak = this.progress.dailyStreak;
-    const label = dailyDone
-      ? `Daily done - ${streak} day streak`
-      : streak > 0
-        ? `Daily Chord - streak ${streak}`
-        : 'Daily Chord';
+    const label = dailyDone ? `Done x${streak}` : streak > 0 ? `Daily x${streak}` : 'Daily';
     this.hud.setMenuState(
       FLAT_LEVELS.map((l) => (this.progress.solved.includes(l.level.id) ? 'solved' : 'open')),
       this.levelIndex,
@@ -428,6 +451,7 @@ export class GameSystem extends createSystem({}) {
     const prev = this.result;
     this.result = trace(this.state);
     this.beams!.setSegments(this.result.segments);
+    this.updateGlints();
     const meter: (string | null)[] = [];
     for (const p of this.state.pieces) {
       if (p.kind !== 'target') continue;
@@ -452,6 +476,25 @@ export class GameSystem extends createSystem({}) {
     if (this.result.solved && !this.solved && !silent && !this.anyPieceHeld()) this.onSolved();
   }
 
+  /** A glint wherever a beam strikes an optic or crystal. */
+  private updateGlints(): void {
+    if (!this.result || !this.board || !this.sparkles) return;
+    const seen = new Set<string>();
+    const pts: { p: Vector3; color: number }[] = [];
+    for (const seg of this.result.segments) {
+      if (!Number.isInteger(seg.x1) || !Number.isInteger(seg.y1)) continue;
+      const hit = pieceAt(this.state, seg.x1, seg.y1);
+      if (!hit || hit.kind === 'wall' || hit.kind === 'emitter') continue;
+      const key = `${seg.x1},${seg.y1},${seg.color}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const p = this.board.cellToLocal(seg.x1, seg.y1, new Vector3());
+      p.y = this.board.cell * (hit.kind === 'target' ? 0.42 : 0.3);
+      pts.push({ p, color: seg.color });
+    }
+    this.sparkles.setGlints(pts);
+  }
+
   private onSolved(): void {
     this.solved = true;
     this.selected = null;
@@ -460,7 +503,13 @@ export class GameSystem extends createSystem({}) {
     this.boost = 1;
     const notes = [...this.notes.values()];
     const center = this.boardRoot.getWorldPosition(this.v3);
-    window.setTimeout(() => this.audio.resolve(notes, chordBass(this.movement, this.indexInMovement), center), 250);
+    this.audio.resolve(notes, chordBass(this.movement, this.indexInMovement), center, 0.25);
+    for (const p of this.state.pieces) {
+      if (p.kind !== 'target') continue;
+      const local = this.board!.cellToLocal(p.x, p.y, new Vector3());
+      local.y = this.board!.cell * 0.45;
+      this.sparkles?.burst(local, p.color, 36);
+    }
 
     const id = this.level.id;
     if (this.levelIndex >= 0) {
@@ -481,22 +530,18 @@ export class GameSystem extends createSystem({}) {
     if (this.levelIndex < 0) status = `Daily chord complete. Streak: ${this.progress.dailyStreak} day(s).`;
     else if (movementDone) {
       status = `${MOVEMENTS[this.movement].title} complete. Listen...`;
-      window.setTimeout(() => this.playMovementSong(this.movement), 2600);
+      this.playMovementSong(this.movement, 2.6);
     } else if (this.hasNext()) status = 'The crystals sing. Tap Next when ready.';
     this.hud.setStatus(status);
     this.hud.setSolved(true, this.hasNext());
   }
 
   /** Replay a movement's eight chords: the song the player composed. */
-  private playMovementSong(movement: number): void {
+  private playMovementSong(movement: number, delay: number): void {
     const music = MOVEMENT_MUSIC[movement];
     const center = this.boardRoot.getWorldPosition(new Vector3());
-    music.progression.forEach((degree, i) => {
-      const tones = chordTones(music, degree);
-      tones.slice(0, 3).forEach((n, j) => {
-        window.setTimeout(() => this.audio.bell(n + 12, center, 0.6, 2.4), i * 620 + j * 90);
-      });
-    });
+    const chords = music.progression.map((degree) => chordTones(music, degree).slice(0, 3).map((n) => n + 12));
+    this.audio.song(chords, center, delay);
   }
 
   // ---------------------------------------------------------------- actions
@@ -548,6 +593,7 @@ export class GameSystem extends createSystem({}) {
   }
 
   private noteFirstMove(): void {
+    this.idle = 0;
     if (!this.firstMove) return;
     this.firstMove = false;
     this.clearHint();
@@ -851,6 +897,8 @@ export class GameSystem extends createSystem({}) {
     this.lastGrabActivity = this.time;
     if (grab.kind === 'board') {
       this.audio.tick('place');
+      this.anchorChecked = true;
+      this.wantAnchor = true;
       return;
     }
     const p = this.piece(grab.id);
@@ -864,6 +912,36 @@ export class GameSystem extends createSystem({}) {
     }
     // A solve that happened while the piece was held is announced on release.
     if (this.result?.solved && !this.solved) this.onSolved();
+  }
+
+  // ---------------------------------------------------------------- anchor
+
+  /** Keep the table locked to its persistent spatial anchor. */
+  private updateAnchor(): void {
+    const xr = this.world.renderer.xr;
+    if (this.wantAnchor && !this.pendingPlacement) {
+      this.wantAnchor = false;
+      this.boardRoot.updateWorldMatrix(true, false);
+      this.table.requestAt(
+        this.boardRoot.getWorldPosition(this.v1),
+        this.boardRoot.getWorldQuaternion(this.q1),
+      );
+    }
+    const boardHeld = this.grabs.left?.kind === 'board' || this.grabs.right?.kind === 'board';
+    const ok = this.table.update(xr.getFrame(), xr.getReferenceSpace(), this.originMatrix, this.anchorPos, this.anchorQuat);
+    if (!ok || boardHeld || this.pendingPlacement) return;
+    if (!this.anchorChecked) {
+      this.anchorChecked = true;
+      // A table left in another room is no use: start fresh in front of the player.
+      if (this.anchorPos.distanceTo(this.headPos) > 1.6) {
+        this.table.reset();
+        this.wantAnchor = true;
+        return;
+      }
+    }
+    this.boardRoot.position.copy(this.anchorPos);
+    this.v2.set(0, 0, -1).applyQuaternion(this.anchorQuat).setY(0);
+    if (this.v2.lengthSq() > 1e-4) this.boardRoot.rotation.set(0, Math.atan2(-this.v2.x, -this.v2.z), 0);
   }
 
   // ---------------------------------------------------------------- gaze
@@ -917,7 +995,14 @@ export class GameSystem extends createSystem({}) {
   // ---------------------------------------------------------------- frame
 
   update(delta: number, time: number): void {
-    const dt = Math.min(delta, 0.05);
+    let dt = Math.min(delta, 0.05);
+    // Deterministic clock for frame-by-frame capture of the demo video.
+    const vc = (window as unknown as { __prismClock?: { time: number; dt: number } }).__prismClock;
+    if (vc) {
+      dt = vc.dt;
+      vc.dt = 0;
+      time = vc.time;
+    }
     this.time = time;
     const immersive = this.world.renderer.xr.isPresenting;
 
@@ -936,7 +1021,10 @@ export class GameSystem extends createSystem({}) {
     }
 
     this.updateHands();
-    if (immersive) this.updateGaze(dt);
+    if (immersive) {
+      this.updateAnchor();
+      this.updateGaze(dt);
+    }
 
     if (this.pendingTap && time >= this.pendingTap.at) {
       const tap = this.pendingTap;
@@ -945,6 +1033,13 @@ export class GameSystem extends createSystem({}) {
     }
 
     if (this.hint && time > this.hint.until) this.clearHint();
+    this.idle += dt;
+    const lesson = this.levelIndex >= 0 && this.levelIndex < 6;
+    if (lesson && !this.autoHinted && !this.solved && this.idle > 9 && !this.anyPieceHeld()) {
+      this.autoHinted = true;
+      this.showHint();
+    }
+    this.sparkles?.update(dt, time);
     this.hint?.view.update(dt, time);
 
     this.boost = Math.max(0, this.boost - dt * 0.5);
@@ -1002,6 +1097,8 @@ export class GameSystem extends createSystem({}) {
           point: h.point.toArray(),
           grab: this.grabs[h.handedness]?.kind === 'piece' ? (this.grabs[h.handedness] as PieceGrab).id : this.grabs[h.handedness]?.kind ?? null,
         })),
+      uiWorld: (id: string) =>
+        (this.hud.object.getElementById(id) as unknown as Object3D).getWorldPosition(new Vector3()).toArray(),
       grabPoint: (id: number) => {
         const v = this.views.get(id)!;
         const p = v.root.getWorldPosition(new Vector3());

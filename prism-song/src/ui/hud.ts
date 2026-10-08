@@ -110,7 +110,7 @@ export class Hud {
       });
     });
     this.set('btn-daily-label', { text: dailyLabel });
-    this.set('btn-sound-label', { text: soundOn ? 'Sound on' : 'Sound off' });
+    this.set('btn-sound-label', { text: soundOn ? 'Sound' : 'Muted' });
   }
 
   dispose(): void {

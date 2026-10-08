@@ -10,9 +10,11 @@ import {
   CylinderGeometry,
   Float32BufferAttribute,
   Group,
+  InstancedMesh,
   LineBasicMaterial,
   LineSegments,
   Material,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
@@ -68,6 +70,25 @@ export class BoardView {
     slab.position.y = -0.007;
     this.group.add(slab);
     this.materials.push(slabMat);
+
+    // Glass tiles, one per cell.
+    const tileMat = new MeshStandardMaterial({
+      color: 0x1c2333,
+      roughness: 0.18,
+      metalness: 0.5,
+      emissive: 0x0b1020,
+    });
+    this.materials.push(tileMat);
+    const tiles = new InstancedMesh(new BoxGeometry(cell * 0.9, 0.002, cell * 0.9), tileMat, size * size);
+    const m = new Matrix4();
+    for (let x = 0; x < size; x++) {
+      for (let y = 0; y < size; y++) {
+        m.makeTranslation((x - (size - 1) / 2) * cell, 0.0005, -(y - (size - 1) / 2) * cell);
+        tiles.setMatrixAt(y * size + x, m);
+      }
+    }
+    tiles.raycast = () => {};
+    this.group.add(tiles);
 
     // Grid lines.
     const pts: number[] = [];
