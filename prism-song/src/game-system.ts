@@ -132,6 +132,7 @@ export class GameSystem extends createSystem({}) {
 
   private hint: { view: PieceView; until: number } | null = null;
   private idle = 0;
+  private loadedAt = 0;
   private autoHinted = false;
   private placedInXR = false;
   private table = new TableAnchor();
@@ -261,6 +262,7 @@ export class GameSystem extends createSystem({}) {
     this.pendingTap = null;
     this.firstMove = true;
     this.idle = 0;
+    this.loadedAt = this.time;
     this.autoHinted = false;
     this.gazeSung.clear();
     this.setMenu(false);
@@ -461,7 +463,7 @@ export class GameSystem extends createSystem({}) {
     if (!board) return;
     const hud = this.hud.object;
     const parent = hud.parent;
-    const raise = this.world.renderer.xr.isPresenting ? 0.24 : 0.1;
+    const raise = this.world.renderer.xr.isPresenting ? 0.24 : this.menuOpen ? 0.21 : 0.1;
     this.v1.set(0, raise, -(board.width / 2 + board.cell * 0.6 + 0.08));
     this.boardRoot.localToWorld(this.v1);
     if (parent) parent.worldToLocal(this.v1);
@@ -1010,7 +1012,9 @@ export class GameSystem extends createSystem({}) {
         const view = this.views.get(best)!;
         const note = this.notes.get(best);
         if (note !== undefined) this.audio.bell(note, view.root.getWorldPosition(this.v3), 0.35, 1.6);
-        if (!this.solved) this.hud.setStatus(`This crystal wants ${needDescription(p.color)} light.`);
+        // Don't talk over a lesson's opening hint while the player is still reading it.
+        const settled = !this.firstMove || this.time - this.loadedAt > 5;
+        if (!this.solved && settled) this.hud.setStatus(`This crystal wants ${needDescription(p.color)} light.`);
       }
     }
   }

@@ -177,7 +177,8 @@ const scenes = [
   // 4. Gaze, poke, two hands.
   async () => {
     await ev(() => window.prismSong.load(5));
-    await tl.wait(0.8);
+    tl.caption('Each lesson teaches one idea.', 3.4);
+    await tl.wait(4.0);
     tl.caption('Look at a crystal to hear it and see what it needs.', 4.4);
     await lookAt(above(grab(2), 0.02), 1.0);
     await tl.wait(1.8);
