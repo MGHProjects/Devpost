@@ -57,8 +57,9 @@ Estado:
 - 31 tests unitarios y tests end-to-end con manos emuladas, todos en verde.
   Build de producción sin errores.
 - Workflow de GitHub Pages en `.github/workflows/prism-song-pages.yml`.
-- Vídeo de demo generado en el emulador. El script de grabación está en
-  `prism-song/scripts/video/`.
+- **Vídeo de demo listo** (83 s, en el emulador Quest 3, con sonido y subtítulos):
+  [`prism-song/media/prism-song-demo.mp4`](prism-song/media/prism-song-demo.mp4).
+  Para la galería de Devpost: `prism-song/media/screenshot-*.jpg`.
 
 ## 3. Lo que tienes que hacer tú (antes del **18 nov 2026, 12:00 PST = 21:00 hora peninsular**)
 
@@ -70,6 +71,7 @@ Estado:
    un plan de pago; si no lo tienes, hazlo público o usa Vercel
    (`npx vercel deploy --prod` en `prism-song/`).
 4. Si tienes unas Quest, abre la URL en el navegador de Quest y prueba (Enter XR).
-5. **Sube el vídeo** (`prism-song-demo.mp4`) a YouTube como público.
+5. **Sube el vídeo** (`prism-song/media/prism-song-demo.mp4`) a YouTube como
+   público. Si tienes Quest, puedes grabar uno real en lugar de este.
 6. Rellena el formulario con [`prism-song/SUBMISSION.md`](prism-song/SUBMISSION.md):
    faltan la URL, el enlace del vídeo, el equipo y la fecha de lanzamiento.

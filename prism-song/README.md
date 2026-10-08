@@ -84,6 +84,8 @@ npx @iwsdk/cli browser run scripts/e2e/xr-hands.mjs    # pinch, twist, poke, han
 
 ### Demo video
 
+[`media/prism-song-demo.mp4`](media/prism-song-demo.mp4) (83 s), with stills in `media/`.
+
 `scripts/video/record.mjs` drives the IWER emulator's hands and headset frame by
 frame on a virtual clock. It captures every frame, and the game logs every sound
 event, which is then rendered offline with the same synth code, so the

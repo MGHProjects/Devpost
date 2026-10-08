@@ -216,6 +216,8 @@ export class GameSystem extends createSystem({}) {
   private backdrop = new ThreeColor(0x0b0e16);
 
   private withSound(fn: () => void): void {
+    // A pinch on a piece can also fire the hand's ray at the HUD; ignore that.
+    if (this.grabs.left || this.grabs.right || this.time - this.lastGrabActivity < TAP_SUPPRESS) return;
     this.audio.unlock();
     this.audio.tick('ui');
     fn();

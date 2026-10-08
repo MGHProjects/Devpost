@@ -26,7 +26,7 @@ Judges open it in the Meta Quest Browser and tap **Enter XR**.
 
 ## Demo video
 
-**TODO:** upload `prism-song-demo.mp4` to YouTube (public) and paste the link.
+**TODO:** upload `media/prism-song-demo.mp4` to YouTube (public) and paste the link.
 It's under 3 minutes and was captured in the IWER Meta Quest 3 emulator, which the rules allow.
 
 ## Description (about 450 words)
