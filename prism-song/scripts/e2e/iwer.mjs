@@ -39,6 +39,7 @@ export function installHelpers(app) {
         dev.quaternion.set(q[0], q[1], q[2], q[3]);
       },
     };
+    dev.controlMode = 'programmatic';
     dev.primaryInputMode = 'hand';
     return true;
   }, PINCH_OFFSET);

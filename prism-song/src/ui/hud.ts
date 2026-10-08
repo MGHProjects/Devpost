@@ -27,6 +27,8 @@ const LEVELS = 24;
 
 export class Hud {
   readonly object: UIKitMLAsset;
+  /** Last status line shown (for tests). */
+  status = '';
   private cleanup: (() => void)[] = [];
 
   constructor(world: World, handlers: HudHandlers) {
@@ -59,9 +61,11 @@ export class Hud {
     this.set('hud-eyebrow', { text: eyebrow });
     this.set('hud-title', { text: title });
     this.set('hud-status', { text: status });
+    this.status = status;
   }
 
   setStatus(status: string): void {
+    this.status = status;
     this.set('hud-status', { text: status });
   }
 

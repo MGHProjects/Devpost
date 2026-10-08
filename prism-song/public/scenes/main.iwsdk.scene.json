@@ -3,9 +3,24 @@
   "units": "meters",
   "components": {
     "com.iwsdk.components.IBLGradient": {
-      "sky": [0.72, 0.78, 0.92, 1],
-      "equator": [0.55, 0.58, 0.68, 1],
-      "ground": [0.25, 0.24, 0.28, 1],
+      "sky": [
+        0.72,
+        0.78,
+        0.92,
+        1
+      ],
+      "equator": [
+        0.55,
+        0.58,
+        0.68,
+        1
+      ],
+      "ground": [
+        0.25,
+        0.24,
+        0.28,
+        1
+      ],
       "intensity": 1.1
     }
   },
@@ -19,13 +34,20 @@
         "asset": "hud-panel"
       },
       "transform": {
-        "position": [0, 1.15, -0.75],
+        "position": [
+          0,
+          1.15,
+          -0.75
+        ],
         "scale": 0.1
       },
       "components": {
-        "RayInteractable": {}
+        "RayInteractable": {},
+        "PokeInteractable": {}
       }
     }
   ],
-  "authoring": { "views": [] }
+  "authoring": {
+    "views": []
+  }
 }

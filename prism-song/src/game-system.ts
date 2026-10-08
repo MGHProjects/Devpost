@@ -18,13 +18,14 @@ import {
   Group,
   Matrix4,
   Object3D,
+  PokeInteractable,
   Quaternion,
   RayInteractable,
   Vector3,
   VisibilityState,
   createSystem,
 } from '@iwsdk/core';
-import { AudioEngine } from './audio/engine.js';
+import { AudioEngine, encodeWav } from './audio/engine.js';
 import { renderAscii } from './game/ascii.js';
 import { CAMPAIGN, MOVEMENTS, dailyLevel } from './game/levels.js';
 import { chordBass, chordTones, MOVEMENT_MUSIC, targetNotes } from './game/music.js';
@@ -121,7 +122,7 @@ export class GameSystem extends createSystem({}) {
   private hover: { left: number | null; right: number | null } = { left: null, right: null };
   private selected: number | null = null;
   private pendingTap: PendingTap | null = null;
-  private pressStart = new Map<number, number>();
+  private pressStart = new Map<number, { id: number; at: number }>();
   private lastGrabActivity = -10;
   private time = 0;
 
@@ -276,7 +277,11 @@ export class GameSystem extends createSystem({}) {
     });
     surface.addComponent(RayInteractable);
     this.entities.push(surface);
-    board.surface.addEventListener('click', (e) => this.onSurfaceClick(e.point));
+    const downs = new Set<number>();
+    board.surface.addEventListener('pointerdown', (e) => downs.add(e.pointerId));
+    board.surface.addEventListener('pointerup', (e) => {
+      if (downs.delete(e.pointerId)) this.onSurfaceClick(e.point);
+    });
     board.surface.addEventListener('pointermove', (e) => this.onSurfaceMove(e.point));
     board.surface.addEventListener('pointerleave', () => this.selected === null || board.setCursor(null));
 
@@ -286,7 +291,11 @@ export class GameSystem extends createSystem({}) {
     });
     tray.addComponent(RayInteractable);
     this.entities.push(tray);
-    board.traySurface.addEventListener('click', () => this.onTrayClick());
+    const trayDowns = new Set<number>();
+    board.traySurface.addEventListener('pointerdown', (e) => trayDowns.add(e.pointerId));
+    board.traySurface.addEventListener('pointerup', (e) => {
+      if (trayDowns.delete(e.pointerId)) this.onTrayClick();
+    });
 
     for (const piece of this.state.pieces) {
       const view = new PieceView(piece, board.cell);
@@ -297,13 +306,17 @@ export class GameSystem extends createSystem({}) {
       });
       this.entities.push(entity);
       entity.addComponent(RayInteractable);
+      entity.addComponent(PokeInteractable);
+      // Taps are pointerdown -> pointerup on the same piece, timed with the
+      // game clock (so long-press works the same in emulators and on device).
       view.root.addEventListener('pointerdown', (e) => {
-        this.pressStart.set(e.pointerId, performance.now());
+        this.pressStart.set(e.pointerId, { id: piece.id, at: this.time });
       });
-      view.root.addEventListener('click', (e) => {
-        const t0 = this.pressStart.get(e.pointerId) ?? performance.now();
-        const long = performance.now() - t0 > LONG_PRESS_MS;
-        this.onPieceTap(piece.id, long, e.pointerType);
+      view.root.addEventListener('pointerup', (e) => {
+        const press = this.pressStart.get(e.pointerId);
+        this.pressStart.delete(e.pointerId);
+        if (!press || press.id !== piece.id) return;
+        this.onPieceTap(piece.id, this.time - press.at > LONG_PRESS_MS / 1000, e.pointerType);
       });
       view.root.addEventListener('pointerenter', () => view.setHighlight(this.canInteract(piece) ? 1 : 0.35));
       view.root.addEventListener('pointerleave', () => view.setHighlight(0));
@@ -328,7 +341,8 @@ export class GameSystem extends createSystem({}) {
 
   private defaultStatus(): string {
     const n = this.state.pieces.filter((p) => p.kind === 'target').length;
-    return n === 1 ? 'Guide the light into the crystal.' : `Make all ${n} crystals sing.`;
+    if (n === 1) return 'Guide the light into the crystal.';
+    return n === 2 ? 'Make both crystals sing.' : `Make all ${n} crystals sing.`;
   }
 
   private teardownLevel(): void {
@@ -420,6 +434,11 @@ export class GameSystem extends createSystem({}) {
     this.boardRoot.position.y = Math.max(0.45, this.headPos.y - 0.42);
     this.boardRoot.rotation.set(0, Math.atan2(-this.v1.x, -this.v1.z), 0);
     this.placedInXR = true;
+    // Re-anchor at the new spot so the old anchor doesn't pull the table back.
+    if (this.anchorChecked) {
+      this.table.reset();
+      this.wantAnchor = true;
+    }
   }
 
   private readHead(): void {
@@ -436,7 +455,7 @@ export class GameSystem extends createSystem({}) {
     if (!board) return;
     const hud = this.hud.object;
     const parent = hud.parent;
-    const raise = this.world.renderer.xr.isPresenting ? 0.2 : 0.1;
+    const raise = this.world.renderer.xr.isPresenting ? 0.24 : 0.1;
     this.v1.set(0, raise, -(board.width / 2 + board.cell * 0.6 + 0.08));
     this.boardRoot.localToWorld(this.v1);
     if (parent) parent.worldToLocal(this.v1);
@@ -985,9 +1004,7 @@ export class GameSystem extends createSystem({}) {
         const view = this.views.get(best)!;
         const note = this.notes.get(best);
         if (note !== undefined) this.audio.bell(note, view.root.getWorldPosition(this.v3), 0.35, 1.6);
-        if (!this.solved && this.firstMove === false) {
-          this.hud.setStatus(`This crystal wants ${needDescription(p.color)} light.`);
-        }
+        if (!this.solved) this.hud.setStatus(`This crystal wants ${needDescription(p.color)} light.`);
       }
     }
   }
@@ -1060,6 +1077,7 @@ export class GameSystem extends createSystem({}) {
         level: this.level.id,
         solved: this.solved,
         selected: this.selected,
+        status: this.hud.status,
         pieces: this.state.pieces.map((p) => ({ ...p })),
         targets: [...(this.result?.targetState.entries() ?? [])],
       }),
@@ -1095,8 +1113,30 @@ export class GameSystem extends createSystem({}) {
           pinching: h.pinching,
           strength: h.strength,
           point: h.point.toArray(),
+          indexTip: h.indexTip.toArray(),
           grab: this.grabs[h.handedness]?.kind === 'piece' ? (this.grabs[h.handedness] as PieceGrab).id : this.grabs[h.handedness]?.kind ?? null,
         })),
+      recenter: () => this.placeInFrontOfHead(),
+      enterXR: (scale?: number) => {
+        if (scale) this.world.renderer.xr.setFramebufferScaleFactor(scale);
+        this.world.launchXR();
+      },
+      xrActive: () => this.world.renderer.xr.isPresenting,
+      menu: (open: boolean) => this.setMenu(open),
+      hint: () => this.showHint(),
+      /** Start logging sound events (for rendering the video soundtrack). */
+      audioLogStart: () => {
+        this.audio.log = [];
+      },
+      /** Render logged sound from t0 for `seconds`; returns a base64 WAV. */
+      audioRender: async (t0: number, seconds: number) => {
+        const events = this.audio.log ?? [];
+        const buf = await AudioEngine.renderOffline(events, seconds, t0);
+        const bytes = new Uint8Array(encodeWav(buf));
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        return btoa(bin);
+      },
       uiWorld: (id: string) =>
         (this.hud.object.getElementById(id) as unknown as Object3D).getWorldPosition(new Vector3()).toArray(),
       grabPoint: (id: number) => {

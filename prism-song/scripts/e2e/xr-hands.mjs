@@ -1,5 +1,5 @@
 // XR hand-tracking test (requires an active emulated session: `iwsdk xr enter`).
-import { installHelpers } from './iwer.mjs';
+import { PINCH_OFFSET, installHelpers } from './iwer.mjs';
 
 export default async function run({ page, frame }) {
   const app = frame ?? page;
@@ -60,6 +60,25 @@ export default async function run({ page, frame }) {
   await settle();
   st = await ev(() => window.prismSong.state());
   check('drop off-board returns to tray', !st.pieces[2].onBoard);
+
+  // Fingertip poke on a crystal: hear it and see what colour it needs.
+  await ev(() => { window.__t.pinch(0); window.__t.handAt([0.3, 1.3, -0.3]); window.prismSong.load(5); });
+  await settle();
+  const tipTarget = await ev((po) => {
+    const h = window.prismSong.hands()[1];
+    const hp = window.IWER_DEVICE.hands.right.position;
+    const tip = [h.indexTip[0] - hp.x - po[0], h.indexTip[1] - hp.y - po[1], h.indexTip[2] - hp.z - po[2]];
+    const c = window.prismSong.grabPoint(3);
+    return [c[0] - tip[0], c[1] + 0.012 - tip[1], c[2] - tip[2]];
+  }, PINCH_OFFSET);
+  await ev((p) => window.__t.handAt([p[0], p[1] + 0.06, p[2] + 0.03]), tipTarget);
+  await settle();
+  await ev((p) => window.__t.handAt(p), tipTarget);
+  await settle();
+  await ev((p) => window.__t.handAt([p[0], p[1] + 0.06, p[2] + 0.03]), tipTarget);
+  await ev(() => window.__t.frames(12));
+  st = await ev(() => window.prismSong.state());
+  check('fingertip poke on crystal shows its need', st.status.includes('blue'), st.status);
 
   // Board handle: pinch and carry the table 12 cm to the right.
   const before = await ev(() => window.prismSong.boardRoot().position.toArray());
