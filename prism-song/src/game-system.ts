@@ -167,6 +167,11 @@ export class GameSystem extends createSystem({}) {
       pick: (i) => this.withSound(() => this.loadIndex(i)),
       daily: () => this.withSound(() => this.loadDaily()),
       toggleSound: () => this.withSound(() => this.toggleSound()),
+      recenter: () =>
+        this.withSound(() => {
+          if (this.world.renderer.xr.isPresenting) this.placeInFrontOfHead(true);
+          this.setMenu(false);
+        }),
     });
     this.cleanupFuncs.push(() => this.hud.dispose());
 
@@ -425,7 +430,7 @@ export class GameSystem extends createSystem({}) {
   }
 
   /** Put the board on a comfortable seated "table" in front of the player. */
-  private placeInFrontOfHead(): void {
+  private placeInFrontOfHead(manual = false): void {
     this.readHead();
     this.v1.copy(this.headFwd).setY(0);
     if (this.v1.lengthSq() < 1e-4) this.v1.set(0, 0, -1);
@@ -435,8 +440,9 @@ export class GameSystem extends createSystem({}) {
     this.boardRoot.rotation.set(0, Math.atan2(-this.v1.x, -this.v1.z), 0);
     this.placedInXR = true;
     // Re-anchor at the new spot so the old anchor doesn't pull the table back.
-    if (this.anchorChecked) {
+    if (manual || this.anchorChecked) {
       this.table.reset();
+      this.anchorChecked = true;
       this.wantAnchor = true;
     }
   }
@@ -1116,7 +1122,7 @@ export class GameSystem extends createSystem({}) {
           indexTip: h.indexTip.toArray(),
           grab: this.grabs[h.handedness]?.kind === 'piece' ? (this.grabs[h.handedness] as PieceGrab).id : this.grabs[h.handedness]?.kind ?? null,
         })),
-      recenter: () => this.placeInFrontOfHead(),
+      recenter: () => this.placeInFrontOfHead(true),
       enterXR: (scale?: number) => {
         if (scale) this.world.renderer.xr.setFramebufferScaleFactor(scale);
         this.world.launchXR();

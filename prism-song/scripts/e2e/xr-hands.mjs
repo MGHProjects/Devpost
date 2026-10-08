@@ -9,6 +9,9 @@ export default async function run({ page, frame }) {
   await installHelpers(app);
   const ev = (fn, arg) => app.evaluate(fn, arg);
   const settle = () => ev(() => window.__t.frames(4));
+  // Start from a known table placement (a restored spatial anchor may have moved it).
+  await ev(() => window.prismSong.recenter());
+  await settle();
 
   // Level 2: pinch the tray mirror, carry it to (3,1), twist, release.
   await ev(() => { window.__t.pinch(0); window.__t.handAt([0.3, 1.3, -0.3]); window.prismSong.load(1); });
@@ -71,9 +74,11 @@ export default async function run({ page, frame }) {
     const c = window.prismSong.grabPoint(3);
     return [c[0] - tip[0], c[1] + 0.012 - tip[1], c[2] - tip[2]];
   }, PINCH_OFFSET);
-  await ev((p) => window.__t.handAt([p[0], p[1] + 0.06, p[2] + 0.03]), tipTarget);
-  await settle();
-  await ev((p) => window.__t.handAt(p), tipTarget);
+  // Approach in small steps, as a real fingertip would (hover, then contact).
+  for (const k of [1, 0.66, 0.33, 0]) {
+    await ev(([p, k]) => window.__t.handAt([p[0], p[1] + 0.06 * k, p[2] + 0.03 * k]), [tipTarget, k]);
+    await settle();
+  }
   await settle();
   await ev((p) => window.__t.handAt([p[0], p[1] + 0.06, p[2] + 0.03]), tipTarget);
   await ev(() => window.__t.frames(12));

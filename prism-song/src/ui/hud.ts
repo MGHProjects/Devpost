@@ -20,6 +20,7 @@ export interface HudHandlers {
   pick(levelIndex: number): void;
   daily(): void;
   toggleSound(): void;
+  recenter(): void;
 }
 
 const METER = 5;
@@ -46,6 +47,7 @@ export class Hud {
     bind('btn-back', handlers.closeMenu);
     bind('btn-daily', handlers.daily);
     bind('btn-sound', handlers.toggleSound);
+    bind('btn-recenter', handlers.recenter);
     for (let i = 0; i < LEVELS; i++) bind(`lvl-${i}`, () => handlers.pick(i));
   }
 

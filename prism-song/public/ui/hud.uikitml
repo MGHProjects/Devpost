@@ -190,6 +190,10 @@
       <ButtonIcon><Volume2></Volume2></ButtonIcon>
       <ButtonLabel id="btn-sound-label" class="button-label">Sound</ButtonLabel>
     </Button>
+    <Button id="btn-recenter" variant="secondary" size="sm">
+      <ButtonIcon><Move></Move></ButtonIcon>
+      <ButtonLabel class="button-label">Recenter</ButtonLabel>
+    </Button>
     <Button id="btn-back" variant="secondary" size="sm">
       <ButtonLabel class="button-label">Back</ButtonLabel>
     </Button>
