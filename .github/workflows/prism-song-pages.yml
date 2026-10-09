@@ -4,7 +4,7 @@ name: Deploy Prism Song to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, claude/clever-bell-ohs0lz]
     paths: ['prism-song/**', '.github/workflows/prism-song-pages.yml']
   workflow_dispatch:
 
