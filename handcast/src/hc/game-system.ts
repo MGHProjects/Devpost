@@ -29,7 +29,8 @@ import {
 import { AudioEngine, encodeWav } from '../audio/engine.js';
 import { computeOptic, FeatureState } from '../core/hand-features.js';
 import { benchToWorld, iwerPoseFromWorld, IWER_REGISTER_POSE_JS } from '../core/iwer-pose.js';
-import { canonicalPose, PoseName } from '../core/pose-library.js';
+import { fkPose, PoseParams } from '../core/fk-hand.js';
+import { canonicalPose, PoseName, POSES } from '../core/pose-library.js';
 import type { PoseShape } from '../core/pose-library.js';
 import { traceLevel } from '../core/trace2d.js';
 import { HandOptic, HandPose, LevelDef, TraceResult, V2 } from '../core/types.js';
@@ -1133,6 +1134,23 @@ export class HandcastSystem extends createSystem({}) {
         const register = new Function(`return ${IWER_REGISTER_POSE_JS}`)() as (a: unknown) => boolean;
         return register({ hand, poseId: `hc-${hand}`, pose: cfg, position: [0, 0, 0], quaternion: [0, 0, 0, 1] });
       },
+      /** Emulator only: like iwerHand but from raw FK params (smooth animation). */
+      iwerHandParams: (params: PoseParams) => {
+        const dev = (window as unknown as { IWER_DEVICE?: { controlMode: string; primaryInputMode: string } }).IWER_DEVICE;
+        if (!dev) return false;
+        dev.controlMode = 'programmatic';
+        dev.primaryInputMode = 'hand';
+        this.benchRoot.updateWorldMatrix(true, false);
+        const bp = new Vector3();
+        const bq = new Quaternion();
+        this.benchRoot.matrixWorld.decompose(bp, bq, new Vector3());
+        const pose = fkPose(params);
+        const w = benchToWorld(pose, [bp.x, bp.y, bp.z], [bq.x, bq.y, bq.z, bq.w]);
+        const cfg = iwerPoseFromWorld(w.pos, w.rot, pose.radii ?? [], [0, 0, 0], [0, 0, 0, 1], params.hand);
+        const register = new Function(`return ${IWER_REGISTER_POSE_JS}`)() as (a: unknown) => boolean;
+        return register({ hand: params.hand, poseId: `hc-${params.hand}`, pose: cfg, position: [0, 0, 0], quaternion: [0, 0, 0, 1] });
+      },
+      poseShape: (name: PoseName) => POSES[name],
       /** Emulator only: IWER's own pinch pose with its pinch point at a bench position. */
       iwerPinchAt: (hand: 'left' | 'right', at: [number, number, number], value = 1, yawDeg = 0) => {
         const dev = (window as unknown as { IWER_DEVICE?: { hands: Record<string, { poseId: string; position: { set(x: number, y: number, z: number): void }; quaternion: { set(x: number, y: number, z: number, w: number): void }; setPinchValueImmediate(v: number): void }> } }).IWER_DEVICE;
