@@ -9,7 +9,6 @@
  */
 
 import {
-  AdditiveBlending,
   CylinderGeometry,
   Group,
   InstancedBufferAttribute,
@@ -18,12 +17,13 @@ import {
   ShaderMaterial,
 } from '@iwsdk/core';
 import type { BeamSeg } from '../../core/types.js';
-import { BillboardCloud, LIGHT_SHEET_Y, lightColor } from './props.js';
+import { BillboardCloud, LIGHT_SHEET_Y, lightColor, XR_ADDITIVE } from './props.js';
 
 const vertex = /* glsl */ `
   attribute vec4 iSeg;    // a.x, a.z, end.x, end.z (end = a + shown length)
   attribute vec4 iParams; // radius scale, intensity, live (0/1), seed
   attribute vec3 iColor;
+  attribute vec2 iY;      // heights at a and at the shown end (beams leave real fingertips)
   uniform float uRadius;
   uniform float uHeight;
   varying vec3 vNormalV;
@@ -33,13 +33,17 @@ const vertex = /* glsl */ `
   varying vec3 vParams;
   void main() {
     vec2 d = iSeg.zw - iSeg.xy;
-    float len = length(d);
-    vec2 dir = len > 1e-6 ? d / len : vec2(1.0, 0.0);
-    vec3 fwd = vec3(dir.x, 0.0, dir.y);
-    vec3 up = vec3(0.0, 1.0, 0.0);
+    float hlen = length(d);
+    vec2 dir = hlen > 1e-6 ? d / hlen : vec2(1.0, 0.0);
+    vec3 a3 = vec3(iSeg.x, iY.x, iSeg.y);
+    vec3 b3 = vec3(iSeg.z, iY.y, iSeg.w);
+    vec3 d3 = b3 - a3;
+    float len = length(d3);
+    vec3 fwd = len > 1e-6 ? d3 / len : vec3(dir.x, 0.0, dir.y);
     vec3 side = vec3(-dir.y, 0.0, dir.x);
+    vec3 up = normalize(cross(side, fwd));
     float r = uRadius * iParams.x;
-    vec3 p = vec3(iSeg.x, uHeight, iSeg.y) + fwd * (position.y * len) + side * (position.x * r) + up * (position.z * r);
+    vec3 p = a3 + fwd * (position.y * len) + side * (position.x * r) + up * (position.z * r);
     vec3 n = side * normal.x + up * normal.z;
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
     vNormalV = normalize(normalMatrix * n);
@@ -90,6 +94,8 @@ class SegTable {
   color!: Uint8Array;
   live!: Uint8Array;
   assisted!: Uint8Array;
+  ya!: Float32Array;
+  yb!: Float32Array;
   used!: Uint8Array;
   count = 0;
   capacity = 0;
@@ -116,6 +122,8 @@ class SegTable {
     this.delay = f(this.delay);
     this.color = u(this.color);
     this.live = u(this.live);
+    this.ya = f(this.ya);
+    this.yb = f(this.yb);
     this.assisted = u(this.assisted);
     this.used = u(this.used);
     this.capacity = cap;
@@ -130,6 +138,7 @@ export class BeamRenderer2D {
   private segAttr!: InstancedBufferAttribute;
   private paramAttr!: InstancedBufferAttribute;
   private colorAttr!: InstancedBufferAttribute;
+  private yAttr!: InstancedBufferAttribute;
   private coreMat: ShaderMaterial;
   private haloMat: ShaderMaterial;
   private sparks: BillboardCloud;
@@ -173,7 +182,7 @@ export class BeamRenderer2D {
       },
       transparent: true,
       depthWrite: false,
-      blending: AdditiveBlending,
+      ...XR_ADDITIVE,
     });
   }
 
@@ -181,6 +190,8 @@ export class BeamRenderer2D {
     this.segAttr = new InstancedBufferAttribute(new Float32Array(cap * 4), 4);
     this.paramAttr = new InstancedBufferAttribute(new Float32Array(cap * 4), 4);
     this.colorAttr = new InstancedBufferAttribute(new Float32Array(cap * 3), 3);
+    this.yAttr = new InstancedBufferAttribute(new Float32Array(cap * 2), 2);
+    this.geo.setAttribute('iY', this.yAttr);
     this.geo.setAttribute('iSeg', this.segAttr);
     this.geo.setAttribute('iParams', this.paramAttr);
     this.geo.setAttribute('iColor', this.colorAttr);
@@ -225,6 +236,8 @@ export class BeamRenderer2D {
       cur.color[i] = s.color;
       cur.live[i] = s.live ? 1 : 0;
       cur.assisted[i] = s.assisted ? 1 : 0;
+      cur.ya[i] = s.ya ?? this.height;
+      cur.yb[i] = s.yb ?? this.height;
       let match = -1;
       for (let j = 0; j < prev.count; j++) {
         if (prev.used[j] || prev.color[j] !== s.color) continue;
@@ -287,6 +300,11 @@ export class BeamRenderer2D {
       seg[i * 4 + 1] = az;
       seg[i * 4 + 2] = ex;
       seg[i * 4 + 3] = ez;
+      const ys = this.yAttr.array as Float32Array;
+      const ya = cur.ya[i];
+      const ey = ya + (cur.yb[i] - ya) * u;
+      ys[i * 2] = ya;
+      ys[i * 2 + 1] = ey;
       const live = cur.live[i];
       par[i * 4] = live ? 0.6 : 1;
       par[i * 4 + 1] = shown > 1e-5 ? (live ? 0.5 : 1) : 0;
@@ -298,7 +316,7 @@ export class BeamRenderer2D {
       const growing = shown < len - 1e-5;
       const tw = 0.85 + 0.15 * Math.sin(time * 11 + i * 2.3);
       const gi = (live ? 0.35 : 0.7) * tw * (growing ? 1.6 : 1);
-      sparks.set(sp++, ex, this.height, ez, growing ? 0.016 : 0.011, c.r, c.g, c.b, gi * (1 + this.boost));
+      sparks.set(sp++, ex, ey, ez, growing ? 0.016 : 0.011, c.r, c.g, c.b, gi * (1 + this.boost));
       if (cur.assisted[i]) {
         for (let k = 0; k < SPARKS_PER_ASSIST; k++) {
           const f = (time * 0.45 + k / SPARKS_PER_ASSIST + i * 0.37) % 1;
@@ -316,6 +334,7 @@ export class BeamRenderer2D {
     this.geo.instanceCount = cur.count;
     this.segAttr.needsUpdate = true;
     this.paramAttr.needsUpdate = true;
+    this.yAttr.needsUpdate = true;
     sparks.commit(sp);
     this.coreMat.uniforms.uTime.value = time;
     this.haloMat.uniforms.uTime.value = time;

@@ -64,6 +64,8 @@ export interface Port {
   r: number;
   /** Whether this port is open (extended finger). Wrist is always open (receive only). */
   open: boolean;
+  /** Height of the port above the bench (m), for drawing beams from real fingertips. */
+  y?: number;
 }
 
 /** 2D capsule (stadium) for hand body occlusion. */
@@ -181,6 +183,9 @@ export interface BeamSeg {
   live: boolean;
   /** Set when aim assist bent this ray onto a target. */
   assisted?: boolean;
+  /** Beam heights above the bench at a / b when they differ from the light sheet (hand ports). */
+  ya?: number;
+  yb?: number;
 }
 
 export interface HandIO {

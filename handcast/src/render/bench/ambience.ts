@@ -9,7 +9,10 @@
  * with the bench-top centre in world coordinates whenever the bench moves.
  */
 
-import { BackSide, Group, Mesh, ShaderMaterial, SphereGeometry, Vector3 } from '@iwsdk/core';
+import {
+  CustomBlending,
+  OneFactor,
+  OneMinusSrcAlphaFactor, BackSide, Group, Mesh, ShaderMaterial, SphereGeometry, Vector3 } from '@iwsdk/core';
 import { BillboardCloud, LIGHT_SHEET_Y } from './props.js';
 
 const domeVertex = /* glsl */ `
@@ -42,7 +45,9 @@ const domeFragment = /* glsl */ `
     a *= 0.9 + 0.2 * abs(d.y);
     a += (hash(gl_FragCoord.xy) - 0.5) / 255.0;
     vec3 night = mix(vec3(0.018, 0.02, 0.05), vec3(0.04, 0.03, 0.07), clamp(d.y * 0.5 + 0.5, 0.0, 1.0));
-    gl_FragColor = vec4(night, clamp(a, 0.0, 1.0));
+    a = clamp(a, 0.0, 1.0);
+    // Premultiplied: in passthrough the compositor shows the room at (1 - a).
+    gl_FragColor = vec4(night * a, a);
   }
 `;
 
@@ -76,6 +81,12 @@ export class Ambience {
       transparent: true,
       depthWrite: false,
       depthTest: true,
+      premultipliedAlpha: true,
+      blending: CustomBlending,
+      blendSrc: OneFactor,
+      blendDst: OneMinusSrcAlphaFactor,
+      blendSrcAlpha: OneFactor,
+      blendDstAlpha: OneMinusSrcAlphaFactor,
     });
     this.dome = new Mesh(new SphereGeometry(1, 48, 24), this.mat);
     this.dome.frustumCulled = false;

@@ -31,7 +31,7 @@ export const FEATURE = {
   longEnter: 0.88,
   longExit: 0.82,
   longMaxAngle: 60 * DEG,
-  thumbEnter: 0.85,
+  thumbEnter: 0.86,
   thumbExit: 0.8,
   thumbMaxAngle: 95 * DEG,
   /** Min |xz(T - K)| / |T - K| for a finger to emit into the sheet. */
@@ -104,16 +104,20 @@ export function computeOptic(pose: HandPose, opts: OpticOptions): HandOptic {
   for (let f = 0; f < 5; f++) {
     const chain = FINGER_CHAINS[f];
     const k = KNUCKLE[f];
+    const thumb = f === 0;
+    // The thumb's straightness is measured from its metacarpal: a real tracked
+    // fist bends the thumb MCP as much as its IP, which the IP alone misses.
+    const base = thumb ? chain[0] : k;
     let L = 0;
-    for (let i = chain.indexOf(k); i < chain.length - 1; i++) {
+    for (let i = chain.indexOf(base); i < chain.length - 1; i++) {
       L += len(sub(joint(pos, chain[i + 1]), joint(pos, chain[i])));
     }
     const K = joint(pos, k);
     const T = joint(pos, TIP[f]);
     const kt = sub(T, K);
     const ktLen = len(kt);
-    const s = L > 1e-9 ? ktLen / L : 0;
-    const thumb = f === 0;
+    const reach = thumb ? len(sub(T, joint(pos, base))) : ktLen;
+    const s = L > 1e-9 ? reach / L : 0;
     const was = state ? state.extended[f] : false;
     const threshold = thumb
       ? was ? FEATURE.thumbExit : FEATURE.thumbEnter
@@ -154,6 +158,7 @@ export function computeOptic(pose: HandPose, opts: OpticOptions): HandOptic {
       dir: [d[0], d[1]],
       r: FEATURE.portR,
       open: fan && extended[f] && projectable[f],
+      y: T[1] - benchY,
     });
   }
   ports.push({
@@ -163,6 +168,7 @@ export function computeOptic(pose: HandPose, opts: OpticOptions): HandOptic {
     dir: [-a2[0], -a2[1]],
     r: FEATURE.wristR,
     open: fan,
+    y: W[1] - benchY,
   });
 
   const mid: V3s = [(W[0] + kMiddle[0]) / 2, (W[1] + kMiddle[1]) / 2, (W[2] + kMiddle[2]) / 2];

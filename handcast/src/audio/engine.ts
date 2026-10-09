@@ -9,7 +9,9 @@
  * frame-accurately from the same code that plays live.
  */
 
-import { midiToFreq } from '../game/music.js';
+import { GlassVoices } from './voices.js';
+
+const midiToFreq = (m: number): number => 440 * 2 ** ((m - 69) / 12);
 
 export type TickKind = 'pick' | 'place' | 'rotate' | 'return' | 'deny' | 'ui';
 
@@ -26,11 +28,23 @@ interface Sustain {
 
 export interface AudioEvent {
   t: number;
-  name: 'bell' | 'startSustain' | 'stopSustain' | 'stopAllSustains' | 'tick' | 'resolve' | 'song' | 'setAmbient';
+  name: 'bell' | 'startSustain' | 'stopSustain' | 'stopAllSustains' | 'tick' | 'resolve' | 'song' | 'setAmbient' | 'voice';
   args: unknown[];
 }
 
 const v = (p?: Vec3Like) => (p ? { x: p.x, y: p.y, z: p.z } : undefined);
+
+export type VoiceName =
+  | 'moltenStart'
+  | 'moltenHeat'
+  | 'moltenStop'
+  | 'crackle'
+  | 'ting'
+  | 'shatter'
+  | 'pluck'
+  | 'hushWake'
+  | 'flowTone'
+  | 'stopAll';
 
 export class AudioEngine {
   private ctx: BaseAudioContext | null = null;
@@ -42,6 +56,8 @@ export class AudioEngine {
   /** Added to the context clock; used when replaying a log offline. */
   private offset = 0;
   muted = false;
+  /** Glass-specific voices (molten, ting, shatter, pluck, hush, flow); null until attached. */
+  voices: GlassVoices | null = null;
 
   /** When set, every sound call is appended here (see `renderOffline`). */
   log: AudioEvent[] | null = null;
@@ -81,6 +97,8 @@ export class AudioEngine {
     this.wet = ctx.createGain();
     this.wet.gain.value = 0.42;
     this.wet.connect(reverb).connect(this.master);
+    this.voices = new GlassVoices(ctx, this.dry, this.wet);
+    this.voices.muted = this.muted;
   }
 
   get ready(): boolean {
@@ -319,8 +337,23 @@ export class AudioEngine {
     this.ambient = { gain, oscs };
   }
 
+  /** Calls a GlassVoices method, logged for offline rendering like every other sound. */
+  voice<K extends VoiceName>(name: K, ...args: Parameters<GlassVoices[K]>): void {
+    this.record('voice', [name, ...args]);
+    const v = this.voices;
+    if (!v) return;
+    v.offset = this.offset;
+    (v[name] as (...a: unknown[]) => void).apply(v, args);
+  }
+
+  stopVoices(): void {
+    this.record('voice', ['stopAll']);
+    this.voices?.stopAll();
+  }
+
   setMuted(muted: boolean): void {
     this.muted = muted;
+    if (this.voices) this.voices.muted = muted;
     const ctx = this.ctx;
     if (!ctx) return;
     this.master.gain.setTargetAtTime(muted ? 0 : 0.8, ctx.currentTime, 0.05);

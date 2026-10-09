@@ -10,7 +10,11 @@
  */
 
 import {
-  AdditiveBlending,
+  AddEquation,
+  CustomBlending,
+  OneFactor,
+  SrcAlphaFactor,
+  ZeroFactor,
   BufferAttribute,
   BufferGeometry,
   CanvasTexture,
@@ -63,7 +67,22 @@ export function lightColor(mask: ColorMask): ThreeColor {
 }
 
 /** Height (m) of the horizontal light sheet above the bench top. */
-export const LIGHT_SHEET_Y = 0.018;
+export const LIGHT_SHEET_Y = 0.02;
+
+/**
+ * Additive blending that adds colour but leaves destination alpha alone. In
+ * passthrough (alpha-blend) sessions the compositor treats framebuffer alpha
+ * as coverage, so plain AdditiveBlending (which also adds alpha) would turn
+ * every glow halo into an opaque dark disc over the real room.
+ */
+export const XR_ADDITIVE = {
+  blending: CustomBlending,
+  blendEquation: AddEquation,
+  blendSrc: SrcAlphaFactor,
+  blendDst: OneFactor,
+  blendSrcAlpha: ZeroFactor,
+  blendDstAlpha: OneFactor,
+} as const;
 
 /** The "sour" red-violet of an awake hush stone. */
 export const HUSH_COLOR = new ThreeColor(0.95, 0.16, 0.55);
@@ -232,7 +251,7 @@ export class BillboardCloud {
       uniforms: { uCore: { value: core } },
       transparent: true,
       depthWrite: false,
-      blending: AdditiveBlending,
+      ...XR_ADDITIVE,
     });
     this.mesh = new Mesh(this.geo, mat);
     this.mesh.frustumCulled = false;
@@ -446,7 +465,7 @@ export class LampProp {
       uniforms: { uColor: { value: lightColor(color).clone() }, uOn: { value: 1 }, uLen: { value: len } },
       transparent: true,
       depthWrite: false,
-      blending: AdditiveBlending,
+      ...XR_ADDITIVE,
     });
     const spill = new Mesh(new PlaneGeometry(len, 0.06).rotateX(-Math.PI / 2).translate(len / 2 + 0.006, 0.0006, 0), this.spillMat);
     spill.renderOrder = -4;
@@ -523,7 +542,7 @@ export class WellProp {
       },
       transparent: true,
       depthWrite: false,
-      blending: AdditiveBlending,
+      ...XR_ADDITIVE,
     });
     const pool = new Mesh(new CircleGeometry(r, 64).rotateX(-Math.PI / 2).translate(0, -0.0012, 0), this.mat);
     pool.renderOrder = -5;
@@ -605,7 +624,7 @@ export class CrystalProp {
     this.group.name = 'crystal';
     this.group.position.set(p[0], 0, p[1]);
     const h = CRYSTAL_HEIGHTS[index % CRYSTAL_HEIGHTS.length];
-    const r = 0.0075 + 0.025 * (h - 0.044);
+    const r = 0.0105 + 0.02 * (h - 0.044);
     this.height = h;
     this.radius = r;
     this.mat = new ShaderMaterial({
@@ -670,7 +689,7 @@ export class CrystalProp {
       transparent: true,
       opacity: 0,
       depthWrite: false,
-      blending: AdditiveBlending,
+      ...XR_ADDITIVE,
     });
     this.ring = new Mesh(new RingGeometry(r * 2.3, r * 2.3 + 0.0018, 48).rotateX(-Math.PI / 2).translate(0, 0.0008, 0), this.ringMat);
     this.ring.visible = false;
@@ -773,7 +792,7 @@ export class HushProp {
       },
     });
     const pebble = new Mesh(new SphereGeometry(1, 40, 24), this.mat);
-    pebble.scale.set(0.0165, 0.0095, 0.0135);
+    pebble.scale.set(0.0165, 0.0135, 0.0135);
     pebble.position.y = 0.0062;
     this.body.rotation.y = (index % 2 ? 1 : -1) * 0.12;
     this.body.add(pebble);

@@ -1,15 +1,15 @@
 /**
- * Prism Song: a hands-first mixed-reality light puzzle where every solved
- * board plays a chord. See README.md for the design.
+ * HANDCAST: a hands-first mixed-reality puzzle where your own hand, frozen
+ * into glass, is the only optic. See README.md for the design.
  */
 
 import { World } from '@iwsdk/core';
 import projectOptions from 'virtual:iwsdk-project';
-import { GameSystem } from './game-system.js';
+import { HandcastSystem } from './hc/game-system.js';
 
 World.create(
   document.getElementById('scene-container') as HTMLDivElement,
   projectOptions,
 ).then((world) => {
-  world.registerSystem(GameSystem);
+  world.registerSystem(HandcastSystem);
 });

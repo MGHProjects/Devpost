@@ -23,7 +23,7 @@
 import type { BeamSeg, HandIO, HandOptic, LevelDef, TargetState, TraceOptions, TraceResult, V2 } from './types.js';
 import { DEG, len2, rayBoxExit, rayCapsule, rayCircle, rayConvexPolygon, raySegment } from './vec2.js';
 
-export const CRYSTAL_R = 0.014;
+export const CRYSTAL_R = 0.013;
 export const HUSH_R = 0.014;
 export const DEFAULT_ASSIST = 6 * DEG;
 export const DEFAULT_MAX_DEPTH = 12;
@@ -58,7 +58,7 @@ const enum Hit {
   Blade,
 }
 
-const SEG_STRIDE = 7; // ax, az, bx, bz, color, d0, flags (1 live, 2 assisted)
+const SEG_STRIDE = 9; // ax, az, bx, bz, color, d0, flags (1 live, 2 assisted), ya, yb (NaN = sheet)
 const segBuf = new Float64Array(MAX_SEGMENTS * SEG_STRIDE);
 let segCount = 0;
 
@@ -228,7 +228,7 @@ function nearestHit(
   hitB = b;
 }
 
-function pushSeg(ax: number, az: number, bx: number, bz: number, color: number, d0: number, live: boolean, assisted: boolean): void {
+function pushSeg(ax: number, az: number, bx: number, bz: number, color: number, d0: number, live: boolean, assisted: boolean, ya = NaN, yb = NaN): void {
   if (segCount >= MAX_SEGMENTS) return;
   const o = segCount * SEG_STRIDE;
   segBuf[o] = ax;
@@ -238,6 +238,8 @@ function pushSeg(ax: number, az: number, bx: number, bz: number, color: number, 
   segBuf[o + 4] = color;
   segBuf[o + 5] = d0;
   segBuf[o + 6] = (live ? 1 : 0) | (assisted ? 2 : 0);
+  segBuf[o + 7] = ya;
+  segBuf[o + 8] = yb;
   segCount++;
 }
 
@@ -363,8 +365,9 @@ function tracePath(e: number, ox: number, oz: number, dx: number, dz: number, sk
 }
 
 /** Replays emitter e's cached path with a colour, recording segments and what it lights. */
-function replayPath(e: number, color: number, d0: number, live: boolean, depth: number): void {
+function replayPath(e: number, color: number, d0: number, live: boolean, depth: number, startY = NaN): void {
   const n = emCount[e];
+  const endPort = emEndKind[e] === Hit.Port;
   let o = emStart[e] * PATH_STRIDE;
   for (let j = 0; j < n; j++, o += PATH_STRIDE) {
     if (j > 0) {
@@ -377,7 +380,8 @@ function replayPath(e: number, color: number, d0: number, live: boolean, depth: 
     const bx = pathBuf[o + 2];
     const bz = pathBuf[o + 3];
     if (len2(bx - ax, bz - az) > 1e-7) {
-      pushSeg(ax, az, bx, bz, color, d0 + pathBuf[o + 4], live || pathBuf[o + 5] === 1, j === 0 && emAssisted[e] === 1);
+      const yb = endPort && j === n - 1 ? (H[emEndA[e]].ports[emEndB[e]].y ?? NaN) : NaN;
+      pushSeg(ax, az, bx, bz, color, d0 + pathBuf[o + 4], live || pathBuf[o + 5] === 1, j === 0 && emAssisted[e] === 1, j === 0 ? startY : NaN, yb);
     }
   }
   const a = emEndA[e];
@@ -440,7 +444,8 @@ function findAssist(h: number, px: number, pz: number, dx: number, dz: number, a
   const cosAssist = Math.cos(assist);
   // A ray that already reaches a crystal or a port is never bent (nor flagged as assisted).
   nearestHit(px + dx * RAY_EPS, pz + dz * RAY_EPS, dx, dz, h, -1, -1);
-  if (hitKind === Hit.Crystal || hitKind === Hit.Port) return false;
+  // Nor is a ray heading into a hush stone: avoiding those is the player's job.
+  if (hitKind === Hit.Crystal || hitKind === Hit.Port || hitKind === Hit.Hush) return false;
   let maxCos = 2;
   for (let attempt = 0; attempt < ASSIST_TRIES; attempt++) {
     candCos = cosAssist;
@@ -543,7 +548,7 @@ function runRound(level: LevelDef, assist: number, round: number): void {
         }
         tracePath(e, px + dx * RAY_EPS, pz + dz * RAY_EPS, dx, dz, h, assisted);
       }
-      replayPath(e, color, prevDist[h] + len2(px - entry[0], pz - entry[1]) + RAY_EPS, live, depth);
+      replayPath(e, color, prevDist[h] + len2(px - entry[0], pz - entry[1]) + RAY_EPS, live, depth, port.y ?? NaN);
     }
   }
 }
@@ -602,6 +607,8 @@ export function traceLevel(level: LevelDef, hands: HandOptic[], opts?: TraceOpti
       live: (flags & 1) !== 0,
     };
     if (flags & 2) seg.assisted = true;
+    if (Number.isFinite(segBuf[o + 7])) seg.ya = segBuf[o + 7];
+    if (Number.isFinite(segBuf[o + 8])) seg.yb = segBuf[o + 8];
     segments[s] = seg;
   }
   let solved = level.crystals.length > 0;
