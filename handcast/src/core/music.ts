@@ -1,5 +1,5 @@
 /**
- * Music theory for the crystals (adapted from Prism Song's game/music.ts).
+ * Music theory for the crystals.
  * Each chapter has a key and a chord progression; each board is one chord.
  * Crystals take that chord's tones from left to right (then far to near), so
  * a solved board plays its chord and a solved chapter replays as a song.

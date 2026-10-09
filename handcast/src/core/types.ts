@@ -12,7 +12,7 @@
  *   (cos a, sin a) in (x, z). Forward (away from the player) is -PI/2.
  */
 
-/** Light colour as an additive RGB bitmask (Prism Song convention). */
+/** Light colour as an additive RGB bitmask (R=1, G=2, B=4). */
 export const Color = { R: 1, G: 2, B: 4, Y: 3, M: 5, C: 6, W: 7 } as const;
 export type ColorMask = number;
 

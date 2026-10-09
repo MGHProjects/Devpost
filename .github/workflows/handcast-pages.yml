@@ -36,6 +36,8 @@ jobs:
       - run: npm run build
         env:
           NODE_ENV: production
+          # Optional Hall of Hands backend (community/worker); unset = offline Hall.
+          VITE_HANDCAST_API: ${{ vars.VITE_HANDCAST_API }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: handcast/dist

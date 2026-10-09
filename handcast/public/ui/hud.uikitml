@@ -6,7 +6,7 @@
 <style>
   .root {
     flex-direction: column;
-    width: 400px;
+    width: 428px;
     padding-bottom: 14px;
   }
   .section {
@@ -74,6 +74,15 @@
     margin-top: 14px;
     padding-left: 22px;
     padding-right: 22px;
+  }
+  .tool {
+    padding-left: 11px;
+    padding-right: 11px;
+  }
+  .tight {
+    gap: 5px;
+    padding-left: 16px;
+    padding-right: 16px;
   }
   .grid-row {
     flex-direction: row;
@@ -173,6 +182,10 @@
     <Button id="btn-menu" variant="secondary" size="sm">
       <ButtonIcon><LayoutGrid></LayoutGrid></ButtonIcon>
       <ButtonLabel class="button-label">Menu</ButtonLabel>
+    </Button>
+    <Button id="btn-like" size="sm" style="display: none">
+      <ButtonIcon><Heart></Heart></ButtonIcon>
+      <ButtonLabel id="btn-like-label" class="button-label">Like</ButtonLabel>
     </Button>
     <Button id="btn-next" size="sm">
       <ButtonLabel class="button-label">Next</ButtonLabel>
@@ -296,17 +309,21 @@
     <div id="studio-status" class="status">Cast a hand in the light, then drop crystals where it shines.</div>
     <div id="studio-code" class="code"></div>
   </div>
-  <div id="studio-tools" class="row" style="display: none">
-    <Button id="tool-lamp" variant="secondary" size="sm"><ButtonLabel class="button-label">Lamp</ButtonLabel></Button>
-    <Button id="tool-well" variant="secondary" size="sm"><ButtonLabel class="button-label">Pool</ButtonLabel></Button>
-    <Button id="tool-hush" variant="secondary" size="sm"><ButtonLabel class="button-label">Hush</ButtonLabel></Button>
-    <Button id="tool-wall" variant="secondary" size="sm"><ButtonLabel class="button-label">Wall</ButtonLabel></Button>
-    <Button id="tool-erase" variant="secondary" size="sm"><ButtonLabel class="button-label">Erase</ButtonLabel></Button>
+  <div id="studio-tools" class="row tight" style="display: none">
+    <Button id="tool-lamp" class="tool" variant="secondary" size="sm"><ButtonLabel id="tool-lamp-t" class="button-label">Lamp</ButtonLabel></Button>
+    <Button id="tool-well" class="tool" variant="secondary" size="sm"><ButtonLabel id="tool-well-t" class="button-label">Pool</ButtonLabel></Button>
+    <Button id="tool-hush" class="tool" variant="secondary" size="sm"><ButtonLabel id="tool-hush-t" class="button-label">Hush</ButtonLabel></Button>
+    <Button id="tool-wall" class="tool" variant="secondary" size="sm"><ButtonLabel id="tool-wall-t" class="button-label">Wall</ButtonLabel></Button>
+    <Button id="tool-erase" class="tool" variant="secondary" size="sm"><ButtonLabel id="tool-erase-t" class="button-label">Erase</ButtonLabel></Button>
   </div>
-  <div id="studio-actions" class="row" style="display: none">
+  <div id="studio-actions" class="row tight" style="display: none">
+    <Button id="btn-studio-undo" variant="secondary" size="sm">
+      <ButtonIcon><Undo2></Undo2></ButtonIcon>
+      <ButtonLabel class="button-label">Undo</ButtonLabel>
+    </Button>
     <Button id="btn-drop" size="sm">
       <ButtonIcon><Sparkles></Sparkles></ButtonIcon>
-      <ButtonLabel class="button-label">Drop crystals</ButtonLabel>
+      <ButtonLabel class="button-label">Crystals</ButtonLabel>
     </Button>
     <Button id="btn-publish" variant="secondary" size="sm">
       <ButtonIcon><Share2></Share2></ButtonIcon>

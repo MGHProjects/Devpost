@@ -1,6 +1,7 @@
 /**
- * Asset manifest. Prism Song's geometry and sound are generated in code, so
- * the only file asset is the HUD panel.
+ * Asset manifest. HANDCAST's bench, light and sound are generated in code and
+ * the glass hands are baked from public/models/{left,right}.glb at runtime,
+ * so the only manifest asset is the HUD panel.
  */
 
 import { AssetType, defineAssets } from '@iwsdk/core';

@@ -6,7 +6,7 @@
 
 import { Matrix4, Quaternion, Vector3 } from '@iwsdk/core';
 
-const KEY = 'prism-song/anchor/v1';
+const KEY = 'handcast/anchor/v1';
 
 export class TableAnchor {
   private anchor: XRAnchor | null = null;

@@ -34,12 +34,16 @@ export interface HudHandlers {
   assist(): void;
   recenter(): void;
   tool(name: 'lamp' | 'well' | 'hush' | 'wall' | 'erase'): void;
+  studioUndo(): void;
   drop(): void;
   publish(): void;
   studioExit(): void;
   hallTab(tab: 'featured' | 'new' | 'top'): void;
   hallPick(i: number): void;
+  like(): void;
 }
+
+const TOOLS = ['lamp', 'well', 'hush', 'wall', 'erase'] as const;
 
 const SECTIONS: Record<HudSection, string[]> = {
   play: ['play', 'play-actions'],
@@ -79,7 +83,9 @@ export class Hud {
     bind('btn-drop', h.drop);
     bind('btn-publish', h.publish);
     bind('btn-studio-exit', h.studioExit);
-    for (const t of ['lamp', 'well', 'hush', 'wall', 'erase'] as const) bind(`tool-${t}`, () => h.tool(t));
+    bind('btn-studio-undo', h.studioUndo);
+    bind('btn-like', h.like);
+    for (const t of TOOLS) bind(`tool-${t}`, () => h.tool(t));
     bind('hall-featured', () => h.hallTab('featured'));
     bind('hall-new', () => h.hallTab('new'));
     bind('hall-top', () => h.hallTab('top'));
@@ -136,9 +142,23 @@ export class Hud {
     }
   }
 
-  setSolved(solved: boolean, hasNext: boolean): void {
+  setSolved(solved: boolean, hasNext: boolean, canLike = false): void {
     this.set('btn-next', { display: solved && hasNext ? 'flex' : 'none' });
     this.set('btn-hint', { display: solved ? 'none' : 'flex' });
+    this.set('btn-like', { display: solved && canLike ? 'flex' : 'none' });
+  }
+
+  setLike(label: string): void {
+    this.set('btn-like-label', { text: label });
+  }
+
+  /** Highlights the active studio tool (null = none). */
+  setTool(active: string | null): void {
+    for (const t of TOOLS) {
+      const on = t === active;
+      this.set(`tool-${t}`, { backgroundColor: on ? '#2f6bff' : 'rgba(228,230,235,1)' });
+      this.set(`tool-${t}-t`, { color: on ? '#ffffff' : '#1d1f24' });
+    }
   }
 
   setMenuState(states: ('solved' | 'open')[], current: number, labels: { daily: string; sound: string; assist: string }): void {
@@ -154,9 +174,10 @@ export class Hud {
     this.set('btn-assist-label', { text: labels.assist });
   }
 
-  setStudioStatus(text: string, code = ''): void {
+  setStudioStatus(text: string, code?: string): void {
+    this.status = text;
     this.set('studio-status', { text });
-    this.set('studio-code', { text: code });
+    if (code !== undefined) this.set('studio-code', { text: code });
   }
 
   setHall(title: string, rows: { name: string; meta: string }[]): void {

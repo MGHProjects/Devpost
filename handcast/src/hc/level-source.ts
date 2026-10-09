@@ -1,26 +1,17 @@
 /**
- * Where boards come from: the campaign, the Daily, the Kiln, plus the music
- * that crystals play (each board is one chord of its chapter's progression).
+ * Where boards come from: the 49-board campaign, the Daily, the Kiln, plus
+ * the music that crystals play (each board is one chord of its chapter's
+ * progression; core/music.ts).
  */
 
+import { CHAPTERS, allLevels } from '../content/campaign.js';
+import { dailyLevel } from '../content/daily.js';
+import { kilnLevel } from '../content/kiln.js';
+import { chordBass, MOVEMENT_MUSIC, targetNotes } from '../core/music.js';
 import { LevelDef } from '../core/types.js';
-import { devLevels } from './dev-levels.js';
 
-const MAJOR = [0, 2, 4, 5, 7, 9, 11];
-const MINOR = [0, 2, 3, 5, 7, 8, 10];
-const MUSIC = [
-  { root: 60, scale: MAJOR, prog: [0, 4, 5, 3, 0, 1, 3, 4] },
-  { root: 62, scale: MAJOR, prog: [0, 5, 3, 4, 2, 5, 1, 4] },
-  { root: 57, scale: MINOR, prog: [0, 5, 2, 6, 3, 0, 4, 0] },
-  { root: 64, scale: MINOR, prog: [0, 3, 6, 2, 5, 1, 4, 0] },
-  { root: 65, scale: MAJOR, prog: [0, 3, 4, 0, 5, 1, 4, 0] },
-  { root: 55, scale: MAJOR, prog: [0, 4, 5, 2, 3, 0, 3, 4] },
-  { root: 59, scale: MINOR, prog: [0, 6, 5, 4, 3, 2, 4, 0] },
-];
-
-function tone(m: (typeof MUSIC)[number], d: number): number {
-  return m.root + m.scale[d % 7] + 12 * Math.floor(d / 7);
-}
+/** Special board slots (negative levelIndex values). */
+export const SLOT = { daily: -1, kiln: -2, hall: -3, studio: -4 } as const;
 
 export interface LevelSource {
   levels(): LevelDef[];
@@ -30,47 +21,59 @@ export interface LevelSource {
   tonic(level: LevelDef, index: number): number;
   bass(level: LevelDef, index: number): number;
   describe(level: LevelDef, index: number): { eyebrow: string };
+  /** First campaign index of each chapter (for the menu). */
+  chapterStarts(): number[];
 }
 
-/** Chapter music index and position within the chapter for a board. */
-function slot(level: LevelDef, index: number): { chapter: number; pos: number } {
-  if (level.chapter !== undefined) return { chapter: level.chapter, pos: level.index ?? 0 };
-  return { chapter: Math.max(0, index) % MUSIC.length, pos: Math.max(0, index) };
+const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', ''];
+
+/** Chapter music index and position within the chapter for a campaign board. */
+function slot(level: LevelDef): { movement: number; pos: number } | null {
+  if (level.chapter === undefined) return null;
+  const ch = CHAPTERS[level.chapter];
+  return { movement: ch ? ch.music : level.chapter, pos: level.index ?? 0 };
 }
 
 export function levelSource(): LevelSource {
-  const levels = devLevels();
-  const music = (level: LevelDef, index: number) => {
-    const s = slot(level, index);
-    const m = MUSIC[s.chapter % MUSIC.length];
-    return { m, degree: m.prog[s.pos % m.prog.length] };
-  };
+  const levels = allLevels();
+  const starts: number[] = [];
+  let n = 0;
+  for (const c of CHAPTERS) {
+    starts.push(n);
+    n += c.levels.length;
+  }
   return {
     levels: () => levels,
-    daily: () => levels[0],
-    kiln: () => levels[(Math.random() * levels.length) | 0],
-    notesFor(level, index) {
-      const { m, degree } = music(level, index);
-      const chord = [tone(m, degree), tone(m, degree + 2), tone(m, degree + 4)];
-      const order = level.crystals.map((c, i) => ({ i, x: c.p[0], z: c.p[1] })).sort((a, b) => a.x - b.x || a.z - b.z);
-      const notes: number[] = new Array(level.crystals.length);
-      order.forEach(({ i }, n) => {
-        notes[i] = level.crystals[i].note ?? chord[n % 3] + 12 * (1 + Math.floor(n / 3));
-      });
-      return notes;
+    daily: (date) => dailyLevel(date),
+    kiln: (tier, seed) => kilnLevel(Math.max(1, Math.min(3, Math.round(tier))) as 1 | 2 | 3, seed >>> 0),
+    notesFor(level) {
+      const s = slot(level);
+      const fallback = targetNotes(level, s?.movement ?? 0, s?.pos ?? 0);
+      return level.crystals.map((c, i) => c.note ?? fallback[i]);
     },
-    tonic(level, index) {
-      return music(level, index).m.root;
+    tonic(level) {
+      const s = slot(level);
+      if (s) return MOVEMENT_MUSIC[s.movement % MOVEMENT_MUSIC.length].root;
+      // Daily / Kiln / Hall boards carry notes: the lowest is an octave above the chord root.
+      const notes = level.crystals.map((c) => c.note).filter((x): x is number => typeof x === 'number');
+      return notes.length ? Math.min(...notes) - 12 : 60;
     },
-    bass(level, index) {
-      const { m, degree } = music(level, index);
-      return tone(m, degree) - 12;
+    bass(level) {
+      const s = slot(level);
+      if (s) return chordBass(s.movement, s.pos);
+      const notes = level.crystals.map((c) => c.note).filter((x): x is number => typeof x === 'number');
+      return notes.length ? Math.min(...notes) - 24 : 48;
     },
     describe(level, index) {
-      if (index === -1) return { eyebrow: 'DAILY - ONE HAND' };
-      if (index === -2) return { eyebrow: 'THE KILN' };
-      if (index < 0) return { eyebrow: 'HALL OF HANDS' };
-      return { eyebrow: `BOARD ${index + 1} / ${levels.length}` };
+      if (index === SLOT.daily) return { eyebrow: 'DAILY - ONE HAND' };
+      if (index === SLOT.kiln) return { eyebrow: 'THE KILN - FRESH FROM THE FIRE' };
+      if (index === SLOT.hall) return { eyebrow: level.author ? `HALL OF HANDS - BY ${level.author.toUpperCase()}` : 'HALL OF HANDS' };
+      if (index === SLOT.studio) return { eyebrow: 'STUDIO' };
+      const ch = level.chapter !== undefined ? CHAPTERS[level.chapter] : undefined;
+      if (!ch) return { eyebrow: `BOARD ${index + 1} / ${levels.length}` };
+      const num = ROMAN[level.chapter!] ? `${ROMAN[level.chapter!]}. ` : '';
+      return { eyebrow: `${num}${ch.title.toUpperCase()} - ${(level.index ?? 0) + 1} / ${ch.levels.length}` };
     },
+    chapterStarts: () => starts,
   };
 }

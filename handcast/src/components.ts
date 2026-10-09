@@ -1,5 +1,5 @@
 /**
- * Authorable component manifest. Prism Song builds its board from level
+ * Authorable component manifest. HANDCAST builds its bench from level
  * data at runtime, so no custom components are exposed to the editor.
  */
 
