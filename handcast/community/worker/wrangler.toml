@@ -1,0 +1,13 @@
+# Cloudflare Worker for the HANDCAST "Hall of Hands". See README.md for deploy steps.
+name = "handcast-hall"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+[vars]
+ALLOWED_ORIGIN = "https://mghprojects.github.io"
+
+[[d1_databases]]
+binding = "HALL"
+database_name = "handcast-hall"
+# Paste the id printed by `wrangler d1 create handcast-hall`:
+database_id = "00000000-0000-0000-0000-000000000000"
