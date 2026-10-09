@@ -1,11 +1,11 @@
-# Builds Prism Song (IWSDK / WebXR) and publishes it to GitHub Pages.
+# Builds Handcast (IWSDK / WebXR) and publishes it to GitHub Pages.
 # One-time setup: Settings -> Pages -> Build and deployment -> Source: "GitHub Actions".
-name: Deploy Prism Song to GitHub Pages
+name: Deploy Handcast to GitHub Pages
 
 on:
   push:
     branches: [main, claude/clever-bell-ohs0lz]
-    paths: ['prism-song/**', '.github/workflows/prism-song-pages.yml']
+    paths: ['handcast/**', '.github/workflows/handcast-pages.yml']
   workflow_dispatch:
 
 permissions:
@@ -22,14 +22,14 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: prism-song
+        working-directory: handcast
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: prism-song/package-lock.json
+          cache-dependency-path: handcast/package-lock.json
       - run: npm ci
       - run: npm run typecheck
       - run: npx vitest run
@@ -38,7 +38,7 @@ jobs:
           NODE_ENV: production
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: prism-song/dist
+          path: handcast/dist
 
   deploy:
     needs: build
