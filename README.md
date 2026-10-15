@@ -1,77 +1,138 @@
-# Devpost: hackathon elegido y proyecto
+# Devpost: HANDCAST para la Meta VR Start Developer Competition 2026
 
-## 1. Investigación (8 oct 2026)
+## Qué es HANDCAST
 
-Descargué todos los hackathons abiertos o próximos de Devpost (135, API
-`devpost.com/api/hackathons`, páginas 1–15) y los ordené por **premio en
-efectivo**. Los candidatos realistas (online y con premio en efectivo
-verificable):
+Un puzzle de realidad mixta para Meta Quest que se juega solo con las manos,
+sentado a una mesa, en el navegador de las Quest (WebXR, Immersive Web SDK).
+Tu propia mano es la única pieza óptica: sobre tu mesa real aparece un banco de
+cristal con lámparas y charcos de luz. Pones la mano en la luz con una forma
+concreta y te quedas quieto; el cristal fundido la recubre y se solidifica en
+una copia de cristal de esa postura exacta (25 articulaciones). Sacas la mano y
+el cristal se queda. La luz que entra por un extremo abierto de una mano de
+cristal (muñeca, palma en un charco o un dedo extendido) sale por todos los
+demás dedos abiertos. Hay que iluminar cristales con un color exacto (los
+colores se suman) sin tocar las piedras de silencio.
 
-| Hackathon | Efectivo | Nº premios | Cierre | Inscritos | Comentario |
-| --- | ---: | ---: | --- | ---: | --- |
-| **Meta VR Start Developer Competition 2026** | **$1.000.000** | **20** ($20k–$100k) | **18 nov** | 2.624 | Acepta WebXR (IWSDK) alojado en GitHub Pages; ~650 envíos el año pasado |
-| Amazon Developer Hackathon | $138.000 | 12 | 23 oct | 51.940 | Exige Fire TV / Alexa+ / Bee / Ring; competencia enorme |
-| PayPal AI Hackathon | $67.500 | 8 | 12 nov | 9.797 | Abierto, pero pocos premios para muchos inscritos |
-| Nebius x NVIDIA Global AI | $50.000 | 6 | 30 oct | 19.994 | Exige créditos de Nebius Cloud |
-| GitLab "Life After Code" | $45.000 | 9 | 27 oct | 1.298 | Exige GitLab Duo Agent Platform |
-| AWS CDS Agentic AI | $40.000 | 4 | 28 oct | 805 | Orientado a partners de AWS |
-| ForgeHacks Online | "$1.38M" | — | 10 oct | 2.918 | Casi todo son créditos o licencias; el efectivo real es mínimo y solo para estudiantes |
+Contenido: 49 tableros en 7 capítulos, un tablero diario igual para todos
+("One Hand"), el Horno (tableros generados sin fin), el Estudio (creas
+tableros con las manos) y el Hall of Hands (compartes tableros y ves las manos
+de cristal de otros jugadores). Detalles en
+[`handcast/README.md`](handcast/README.md); texto del formulario en
+[`handcast/SUBMISSION.md`](handcast/SUBMISSION.md).
 
-**Elegido: Meta VR Start Developer Competition 2026.** Tiene la mayor bolsa
-en efectivo con diferencia, el mayor número de premios (20) y pocos envíos por
-premio (~650 el año pasado, unos 30 por premio). Quedan 6 semanas de plazo, y
-permite proyectos WebXR (Immersive Web SDK), que se pueden construir y probar
-por completo en un emulador. Valor esperado estimado: un orden de magnitud por
-encima de cualquier otra opción.
+## Por qué este concurso y por qué este proyecto
 
-Reglas clave (de https://start-developer-competition-26.devpost.com/rules):
+- **Concurso.** De los hackathons abiertos en Devpost (revisados el 8 oct),
+  este tiene con diferencia el mayor premio en efectivo: 1.000.000 $ en 20
+  premios. Para Gaming / New Experience: 100.000 $ al ganador y 50.000 $ al
+  segundo, y además seis premios especiales de 25.000 $ (Boldest Original
+  Concept, Best First Five Minutes, Best Reason to Come Back, Best
+  Accessibility Forward Experience, entre otros) y dos Judge's Choice de
+  20.000 $. Admite proyectos WebXR publicados en GitHub Pages y vídeo grabado
+  en emulador.
+- **Cambio de proyecto.** La primera idea, *Prism Song* (llevar rayos de luz
+  con espejos que coges con la mano), se abandonó porque ese juego ya existe:
+  Lumen Lab VR salió en la Horizon Store en septiembre de 2026 con casi la misma
+  propuesta, y hay otros parecidos (LaserBlaze, Labyrinth deLux, Carpe Lucem).
+  No encontramos ningún juego publicado en el que la postura real de tu mano se
+  congele en una pieza que es el puzzle. Además no se puede jugar con mandos,
+  que encaja con el requisito "hands-first".
 
-- Hay que ser **miembro del programa Meta VR Start** y tener una cuenta Meta con
-  *Developer Access* cuando se envía. España no está excluida.
-- Tracks: Entertainment, **Gaming** o Productivity. Divisiones: **New
-  Experience** (creado desde el 24 sep 2026) o Adapted.
-- Debe ser **"hands-first"**: jugable entero sin mando. Pensado para jugar sentado y
-  con sesiones cortas.
-- Hay que entregar el enlace jugable (GitHub Pages para IWSDK), un **vídeo de
-  menos de 3 minutos** (vale grabado en emulador) y el formulario.
-- Criterios (25 % cada uno): innovación, diseño de la experiencia, implementación
-  técnica, pulido y presentación.
+## Estado (15 oct 2026)
 
-## 2. Proyecto: **Prism Song** (`prism-song/`)
+- El juego se puede jugar entero con las manos: campaña, Daily, Horno,
+  Estudio y Hall of Hands.
+- 307 tests unitarios (14 ficheros) en verde y 20 de 20 comprobaciones
+  end-to-end con manos emuladas en el emulador IWER de Quest 3.
+- **GitHub Pages ya funciona.** El workflow
+  `.github/workflows/handcast-pages.yml` publica desde la rama
+  `claude/clever-bell-ohs0lz`, y hoy https://mghprojects.github.io/Devpost/
+  sirve HANDCAST (último despliegue: 9 oct). Cada push a esa rama o a `main`
+  que toque `handcast/` vuelve a publicar.
+- El backend del Hall (Cloudflare Worker + D1) está escrito y probado, pero no
+  desplegado; la versión publicada usa el Hall sin conexión.
+- No consta que se haya probado todavía en unas Quest reales.
+- El vídeo de demo irá en `handcast/media/handcast-demo.mp4` y aún no está.
+  Lo que hay ahora en `handcast/media/` (`prism-song-demo.mp4` y las capturas)
+  es del proyecto anterior: no lo uses.
 
-Puzzle de mesa en **realidad mixta**, manos primero: pellizcas espejos, prismas,
-semiespejos y filtros, los colocas y los giras con la muñeca para llevar haces de
-luz de colores a cristales. Cada cristal es una nota y cada puzzle resuelto suena
-como un acorde. Lo presento en **Gaming / New Experience** y también opta a los
-premios especiales (First Five Minutes, Reason to Come Back, Accessibility,
-Boldest Original Concept).
+## Lo que tienes que hacer tú
 
-Detalles en [`prism-song/README.md`](prism-song/README.md) y el texto del
-formulario en [`prism-song/SUBMISSION.md`](prism-song/SUBMISSION.md).
+Fecha límite: **18 nov 2026, 12:00 PST = 21:00 hora peninsular**.
 
-Estado:
+### a) GitHub Pages (ya está activo; revísalo solo si falla un despliegue)
 
-- 24 puzzles en tres movimientos, más un **Daily Chord** diario con racha.
-- Pellizcar y girar, toque con el dedo, rayo, mirada, mover la mesa con ancla
-  espacial persistente, y audio espacial 100 % sintetizado.
-- 31 tests unitarios y tests end-to-end con manos emuladas, todos en verde.
-  Build de producción sin errores.
-- Workflow de GitHub Pages en `.github/workflows/prism-song-pages.yml`.
-- **Vídeo de demo listo** (83 s, en el emulador Quest 3, con sonido y subtítulos):
-  [`prism-song/media/prism-song-demo.mp4`](prism-song/media/prism-song-demo.mp4).
-  Para la galería de Devpost: `prism-song/media/screenshot-*.jpg`.
+1. **Settings → Pages → Build and deployment → Source: GitHub Actions.**
+2. **Settings → Environments → github-pages → Deployment branches:** permite
+   la rama `claude/clever-bell-ohs0lz`, o fusiona la rama en `main`.
+3. Para volver a publicar a mano: **Actions → Deploy Handcast to GitHub
+   Pages → Run workflow**.
 
-## 3. Lo que tienes que hacer tú (antes del **18 nov 2026, 12:00 PST = 21:00 hora peninsular**)
+### b) Probarlo en tus Meta Quest 3
 
-1. **Únete al programa Meta VR Start** (unos 5 minutos) y activa *Developer Access*
-   en tu cuenta Meta. Sin esto no puedes enviar.
-2. Pulsa **Join hackathon** en la página de Devpost.
-3. **Publica el juego**: haz merge de esta rama a `main` y activa *Settings → Pages
-   → Source: GitHub Actions*. Si el repositorio es privado, GitHub Pages necesita
-   un plan de pago; si no lo tienes, hazlo público o usa Vercel
-   (`npx vercel deploy --prod` en `prism-song/`).
-4. Si tienes unas Quest, abre la URL en el navegador de Quest y prueba (Enter XR).
-5. **Sube el vídeo** (`prism-song/media/prism-song-demo.mp4`) a YouTube como
-   público. Si tienes Quest, puedes grabar uno real en lugar de este.
-6. Rellena el formulario con [`prism-song/SUBMISSION.md`](prism-song/SUBMISSION.md):
-   faltan la URL, el enlace del vídeo, el equipo y la fecha de lanzamiento.
+1. Activa el seguimiento de manos en las Quest y deja los mandos.
+2. Siéntate a una mesa y abre https://mghprojects.github.io/Devpost/ en el
+   navegador de las Quest (Meta Quest Browser). Pulsa **Enter XR**.
+3. Apoya una mano plana sobre la mesa (palma abajo, dedos rectos) y quédate
+   quieto un segundo: el banco aparece bajo tu mano. Si hay que repetirlo:
+   **Menu → Table**.
+4. Primer tablero: pon la mano abierta en el charco de luz y quédate quieto
+   hasta que se vuelva de cristal; luego saca la mano. Apunta cualquier cosa
+   que falle.
+
+### c) Opcional: backend del Hall of Hands
+
+Sin backend el Hall funciona sin conexión: tableros destacados incluidos en el
+juego, los tableros creados en ese dispositivo y enlaces para compartir
+(`#l=...`). Con backend se ven tableros nuevos y populares de otros jugadores y
+sus manos de cristal. Pasos (detalle en
+[`handcast/community/worker/README.md`](handcast/community/worker/README.md)).
+Necesitas una cuenta gratuita de Cloudflare y Node 20 o superior, y hay que
+desplegar desde una copia completa del repositorio porque el Worker importa
+código de `handcast/src/core`:
+
+```bash
+npm i -g wrangler
+cd handcast/community/worker
+wrangler login                       # abre el navegador
+wrangler d1 create handcast-hall     # imprime un database_id
+```
+
+1. Copia el `database_id` en `wrangler.toml` (sustituye
+   `00000000-0000-0000-0000-000000000000`).
+2. Crea las tablas y despliega:
+
+   ```bash
+   wrangler d1 execute handcast-hall --remote --file=./schema.sql
+   wrangler secret put HASH_SALT        # recomendado: cualquier texto largo aleatorio
+   wrangler deploy                      # imprime https://handcast-hall.<tu-subdominio>.workers.dev
+   curl https://handcast-hall.<tu-subdominio>.workers.dev/levels?sort=new   # -> {"entries":[],"cursor":null}
+   ```
+
+3. En GitHub: **Settings → Secrets and variables → Actions → Variables → New
+   repository variable**, nombre `VITE_HANDCAST_API`, valor la URL del Worker
+   sin barra final. El workflow ya pasa esa variable a la build.
+4. Vuelve a lanzar el workflow (apartado a, paso 3) o haz un push.
+
+`ALLOWED_ORIGIN` en `wrangler.toml` ya es `https://mghprojects.github.io`.
+
+### d) Meta VR Start
+
+1. Únete al programa **Meta VR Start** (unos 5 minutos) y activa
+   **Developer Access** en tu cuenta de Meta. Sin esto no puedes enviar el
+   proyecto.
+2. En la página del concurso en Devpost pulsa **Join hackathon**.
+
+### e) Vídeo y formulario de Devpost
+
+1. Sube `handcast/media/handcast-demo.mp4` a YouTube (o Vimeo) como vídeo
+   **público**. Debe durar menos de 3 minutos; las reglas aceptan imágenes del
+   emulador.
+2. Rellena el formulario copiando [`handcast/SUBMISSION.md`](handcast/SUBMISSION.md).
+   Faltan el enlace del vídeo, la fecha de lanzamiento prevista y el equipo
+   (nombre, email y rol). Para la galería usa capturas de HANDCAST, no las de
+   Prism Song.
+3. Envía antes del **18 nov 2026 a las 21:00 (hora peninsular)**. Después del
+   cierre no se puede cambiar el envío y se juzga el estado en esa fecha: no
+   hagas push que vuelva a publicar la web durante la evaluación, y mantén la
+   URL accesible.
