@@ -10,6 +10,6 @@ export async function openApp({ width = 1280, height = 720, url = 'https://local
   page.on('console', (m) => { if (m.type() === 'error') logs.push(m.text()); });
   page.on('pageerror', (e) => logs.push(`pageerror: ${e.message}`));
   await page.goto(url, { waitUntil: 'load' });
-  await page.waitForFunction(() => window.prismSong !== undefined && window.IWER_DEVICE !== undefined, null, { timeout: 60000 });
+  await page.waitForFunction(() => window.handcast !== undefined && window.IWER_DEVICE !== undefined, null, { timeout: 90000 });
   return { browser, page, logs };
 }

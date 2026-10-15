@@ -27,35 +27,32 @@ def font(weight, size):
 
 
 def card(lines, path, beams=True):
-    """Dark card with the game's own motif: a grid, a beam turned by a mirror, a crystal."""
-    img = Image.new('RGB', (W, H), (9, 11, 18))
-    d0 = ImageDraw.Draw(img)
-    cell, gx, gy, n = 46, W // 2 - 46 * 4, 70, 6
-    for i in range(n + 1):
-        d0.line([(gx + i * cell, gy), (gx + i * cell, gy + n * cell)], fill=(32, 38, 56), width=1)
-        d0.line([(gx, gy + i * cell), (gx + n * cell * 1.33, gy + i * cell)], fill=(32, 38, 56), width=1)
+    """Dark card with the game's own motif: a pool of light under an open hand
+    whose five fingertips send beams to five singing crystals."""
+    img = Image.new('RGB', (W, H), (8, 10, 17))
     glow = Image.new('RGB', (W, H), (0, 0, 0))
     g = ImageDraw.Draw(glow)
     if beams:
-        y0 = gy + 4 * cell
-        mx = gx + 3 * cell
-        cyan = (77, 255, 243)
-        g.line([(gx - 120, y0), (mx, y0)], fill=cyan, width=6)
-        g.line([(mx, y0), (mx, gy + 1 * cell)], fill=cyan, width=6)
-        # Mirror at the bend.
-        g.line([(mx - 22, y0 + 22), (mx + 22, y0 - 22)], fill=(230, 238, 255), width=5)
-        # Crystal (octahedron outline) where the beam ends.
-        cx, cy = mx, gy + 1 * cell - 8
-        g.polygon([(cx, cy - 34), (cx + 18, cy), (cx, cy + 22), (cx - 18, cy)], fill=(40, 120, 115), outline=cyan)
-        g.line([(cx - 18, cy), (cx + 18, cy)], fill=cyan, width=2)
-        # A second, warm beam for colour.
-        y1 = gy + 2 * cell
-        g.line([(mx + 4 * cell, y1 + 2 * cell), (mx + 2 * cell, y1)], fill=(255, 225, 77), width=5)
-    blur = glow.filter(ImageFilter.GaussianBlur(12))
-    img = Image.blend(img, blur, 0.85)
-    img.paste(Image.composite(glow, img, glow.convert('L')))
+        cx, cy = W // 2, 330
+        # The pool of light.
+        for r, c in ((70, (60, 52, 30)), (52, (150, 128, 70)), (34, (255, 230, 170))):
+            g.ellipse([cx - r, cy - r * 0.42, cx + r, cy + r * 0.42], outline=c, width=3)
+        colors = [(255, 77, 77), (255, 225, 77), (255, 246, 232), (77, 255, 243), (77, 141, 255)]
+        for k, ang in enumerate((-62, -30, 0, 28, 56)):
+            a = math.radians(ang - 90)
+            # Finger: knuckle -> tip, then the beam on to a crystal.
+            kx, ky = cx + math.cos(a) * 40, cy - 30 + math.sin(a) * 40
+            tx, ty = cx + math.cos(a) * 118, cy - 30 + math.sin(a) * 118
+            ex, ey = cx + math.cos(a) * 250, cy - 30 + math.sin(a) * 250
+            g.line([(kx, ky), (tx, ty)], fill=(205, 225, 255), width=13)
+            g.line([(tx, ty), (ex, ey)], fill=colors[k], width=5)
+            g.polygon([(ex, ey - 22), (ex + 12, ey), (ex, ey + 14), (ex - 12, ey)], fill=colors[k])
+        g.ellipse([cx - 46, cy - 72, cx + 46, cy + 4], fill=(205, 225, 255))
+    blur = glow.filter(ImageFilter.GaussianBlur(14))
+    img = Image.blend(img, blur, 0.9)
+    img.paste(Image.composite(glow, img, glow.convert('L').point(lambda v: 255 if v > 40 else 0)))
     d = ImageDraw.Draw(img)
-    y = 420 if beams else 250
+    y = 470 if beams else 250
     for text, weight, size, color in lines:
         f = font(weight, size)
         w = d.textlength(text, font=f)
@@ -66,16 +63,16 @@ def card(lines, path, beams=True):
 
 card(
     [
-        ('Prism Song', 'Bold', 72, (245, 245, 250)),
-        ('Light puzzles that sing. Hands-first mixed reality.', 'Medium', 30, (200, 205, 220)),
-        ('Captured in the IWER Meta Quest 3 emulator', 'Regular', 20, (130, 136, 150)),
+        ('HANDCAST', 'Bold', 72, (245, 245, 250)),
+        ('Your hand, frozen into glass, is the only optic.', 'Medium', 30, (200, 205, 220)),
+        ('Hands-first mixed reality  -  captured in the IWER Meta Quest 3 emulator', 'Regular', 20, (130, 136, 150)),
     ],
     D / 'title.jpg',
 )
 end_lines = [
-    ('Prism Song', 'Bold', 64, (245, 245, 250)),
-    ('Seated  -  Hands-first  -  Passthrough  -  Spatial audio', 'Medium', 26, (200, 205, 220)),
-    ('24 puzzles + a Daily Chord  -  Built with the Immersive Web SDK', 'Regular', 24, (170, 176, 190)),
+    ('HANDCAST', 'Bold', 64, (245, 245, 250)),
+    ('Seated  -  Hands only  -  Passthrough  -  Every crystal is a note', 'Medium', 26, (200, 205, 220)),
+    ('49 boards, a Daily, the Kiln, a Studio and the Hall of Hands  -  Immersive Web SDK', 'Regular', 22, (170, 176, 190)),
 ]
 if URL:
     end_lines.append(('Play on Meta Quest: ' + URL, 'SemiBold', 24, (143, 166, 255)))
@@ -141,10 +138,10 @@ run([
     '-c:v', 'libx264', '-preset', 'slow', '-crf', '18', '-pix_fmt', 'yuv420p', '-r', str(FPS),
     '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
     '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart',
-    str(D / 'prism-song-demo.mp4'),
+    str(D / 'handcast-demo.mp4'),
 ])
 dur = subprocess.run(
-    ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', str(D / 'prism-song-demo.mp4')],
+    ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', str(D / 'handcast-demo.mp4')],
     capture_output=True, text=True,
 ).stdout.strip()
 print('video duration', dur)

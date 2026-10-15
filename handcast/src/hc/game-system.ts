@@ -168,6 +168,8 @@ export class HandcastSystem extends createSystem({}) {
   private backdrop = new ThreeColor(0x07090f);
 
   private live: Live[] = [];
+  /** Game-clock timers (so scripted captures with a virtual clock stay in sync). */
+  private timers: { at: number; fn: () => void }[] = [];
 
   // scratch
   private m1 = new Matrix4();
@@ -303,6 +305,20 @@ export class HandcastSystem extends createSystem({}) {
       },
     );
     this.hud.show('menu');
+  }
+
+  private after(sec: number, fn: () => void): void {
+    this.timers.push({ at: this.time + sec, fn });
+  }
+
+  private runTimers(): void {
+    if (!this.timers.length) return;
+    for (let i = this.timers.length - 1; i >= 0; i--) {
+      const t = this.timers[i];
+      if (t.at > this.time) continue;
+      this.timers.splice(i, 1);
+      t.fn();
+    }
   }
 
   private setStatus(s: string): void {
@@ -580,7 +596,10 @@ export class HandcastSystem extends createSystem({}) {
     this.setStatus(this.solvedLine());
     if (this.levelIndex === SLOT.hall) void this.reportHallSolve();
     // Reveal: the maker's glass hands fade in beside yours.
-    window.setTimeout(() => this.reveal(), 1400);
+    const level = this.level;
+    this.after(1.4, () => {
+      if (this.level === level) this.reveal();
+    });
   }
 
   private solvedLine(): string {
@@ -882,10 +901,10 @@ export class HandcastSystem extends createSystem({}) {
     // Other players' glass hands fade in as ghosts.
     const hands = await this.hall.listHands(id, 8);
     if (this.level !== level || !this.solved) return;
-    window.setTimeout(() => {
+    this.after(1.6, () => {
       if (this.level !== level || !this.solved) return;
       for (const cd of hands) this.addGhost(castToPose(cd));
-    }, 1600);
+    });
   }
 
   private async likeBoard(): Promise<void> {
@@ -1343,6 +1362,7 @@ export class HandcastSystem extends createSystem({}) {
       this.headUp.set(0, 1, 0);
     }
     this.audio.setListener(this.headPos, this.headFwd, this.headUp);
+    this.runTimers();
     this.anchorTick();
     this.updateHands(dt);
     this.updateDemo(dt);
@@ -1517,6 +1537,17 @@ export class HandcastSystem extends createSystem({}) {
       castSolution: () => {
         for (const cd of this.level.solution ?? []) this.addCast(castToPose(cd));
       },
+      /** Places solution cast i as cold glass, shifted (dx, dz m) and turned (deg) about its foot. */
+      castSolutionAt: (i = 0, dx = 0, dz = 0, yawDeg = 0) => {
+        const cd = this.level?.solution?.[i];
+        if (!cd) return false;
+        const pose = castToPose(cd);
+        return !!this.addCast(transformPose(pose, footOf(pose), (yawDeg * Math.PI) / 180, dx, dz), 'glass', false);
+      },
+      /** Bench [x, z] foot of glass hand i. */
+      castFoot: (i: number) => (this.casts[i] ? footOf(this.casts[i].pose) : null),
+      /** FK parameters of the board's reference solution, when the generator recorded them. */
+      solutionParams: () => (this.level as (LevelDef & { solutionParams?: PoseParams[] }) | undefined)?.solutionParams ?? null,
       clearCasts: () => {
         for (const c of [...this.casts]) this.shatterCast(c);
       },
@@ -1614,6 +1645,7 @@ export class HandcastSystem extends createSystem({}) {
       audioLogStart: () => {
         this.audio.log = [];
       },
+      audioEvents: () => (this.audio.log ?? []).map((e) => (e.name === 'voice' ? `voice:${String(e.args[0])}` : e.name)),
       audioRender: async (t0: number, seconds: number) => {
         const buf = await AudioEngine.renderOffline(this.audio.log ?? [], seconds, t0);
         const bytes = new Uint8Array(encodeWav(buf));
