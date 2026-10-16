@@ -60,6 +60,8 @@ import { loadProgress, Progress, saveProgress } from './progress.js';
 import { sealMessage, StudioCursor, StudioSession, StudioTool } from './studio.js';
 import { createEnterXRButton, EnterXRButton } from './enter-xr.js';
 import { FrameRateGovernor } from './frame-rate.js';
+import { PerfHand, PerfOverlay, perfEnabled, showPerfReport } from './perf-overlay.js';
+import { PerfEventKind, PerfStats } from './perf-stats.js';
 
 const FWD = -Math.PI / 2;
 const SLAB_HEIGHT = 0.11; // a hand participates when its palm is this close to the bench
@@ -142,6 +144,11 @@ export class HandcastSystem extends createSystem({}) {
   private beams: BeamRenderer2D | null = null;
   private table = new TableAnchor();
   private frameRate = new FrameRateGovernor();
+  /** `?perf=1` instrumentation (null when off). */
+  private perfStats: PerfStats | null = null;
+  private perfOverlay: PerfOverlay | null = null;
+  private perfHands: PerfHand[] = [];
+  private perfRate = 0;
   /** In an immersive session (Visible or VisibleBlurred). */
   private immersive = false;
   /** The system menu covers the app: hands are ignored and sound is ducked. */
@@ -231,7 +238,7 @@ export class HandcastSystem extends createSystem({}) {
     for (const hand of this.tracker.hands) {
       this.live.push({
         hand,
-        feat: { extended: [false, false, false, false, false] },
+        feat: { extended: [false, false, false, false, false], ratio: [0, 0, 0, 0, 0] },
         optic: null,
         coat: null,
         coatFor: null,
@@ -250,6 +257,21 @@ export class HandcastSystem extends createSystem({}) {
 
     this.hud = new Hud(this.world, this.hudHandlers());
     this.cleanupFuncs.push(() => this.hud.dispose());
+    if (perfEnabled()) {
+      this.perfStats = new PerfStats();
+      this.perfOverlay = new PerfOverlay(this.perfStats);
+      this.perfHands = this.live.map((l) => ({
+        name: l.hand.hand === 'left' ? 'L' : 'R',
+        tracked: false,
+        lostFor: 0,
+        mode: null,
+        ratio: l.feat.ratio!,
+        open: l.feat.extended,
+        still: false,
+        progress: 0,
+      }));
+      this.cleanupFuncs.push(() => this.perfOverlay?.dispose());
+    }
 
     const unlock = () => this.audio.unlock();
     const canvas = this.world.renderer.domElement;
@@ -450,6 +472,8 @@ export class HandcastSystem extends createSystem({}) {
 
     const bench = (this.bench = new BenchView(level));
     this.benchRoot.add(bench.root);
+    this.perfOverlay?.attach(this.benchRoot, level.bench.w, level.bench.d);
+    this.perfEvent('board', level.id);
     this.beams = new BeamRenderer2D();
     bench.root.add(this.beams.group);
 
@@ -494,6 +518,7 @@ export class HandcastSystem extends createSystem({}) {
   }
 
   private resetBoard(): void {
+    this.perfEvent('reset');
     this.loadLevel(this.level);
   }
 
@@ -555,6 +580,7 @@ export class HandcastSystem extends createSystem({}) {
   private shatterCast(c: Cast): void {
     const i = this.casts.indexOf(c);
     if (i < 0) return;
+    this.perfEvent('shatter');
     this.casts.splice(i, 1);
     const s = c.view.shatter();
     this.shatters.push(s);
@@ -685,6 +711,7 @@ export class HandcastSystem extends createSystem({}) {
     this.setStatus((this.solvedStatus = this.solvedLine()));
     if (this.solvedOnce) return;
     this.solvedOnce = true;
+    this.perfEvent('solved', this.level.id);
     if (this.levelIndex >= 0 && !this.progress.solved.includes(this.level.id)) this.progress.solved.push(this.level.id);
     if (this.levelIndex === SLOT.daily) this.recordDaily();
     saveProgress(this.progress);
@@ -741,6 +768,7 @@ export class HandcastSystem extends createSystem({}) {
   }
 
   private showHint(): void {
+    this.perfEvent('hint');
     if (this.solved || !this.level.solution) return;
     const placed = this.casts.length;
     const cd = this.level.solution[Math.min(placed, this.level.solution.length - 1)];
@@ -1077,6 +1105,7 @@ export class HandcastSystem extends createSystem({}) {
       const h = l.hand;
       this.ensureCoat(l);
       if (!h.tracked) {
+        if (l.lostFor < LOSS_GRACE && l.lostFor + dt >= LOSS_GRACE) this.perfEvent('loss', l.hand.hand);
         l.lostFor += dt;
         // A dropped frame or two (common when a palm touches the table) keeps
         // the hold, the grab and the live optic; only a real loss ends them.
@@ -1172,6 +1201,7 @@ export class HandcastSystem extends createSystem({}) {
   }
 
   private commitCast(l: Live): void {
+    this.perfEvent('cast', l.hand.hand);
     const snap = l.hand.snapshot(8);
     let pose: HandPose = { hand: snap.hand, pos: snap.pos, rot: snap.rot, radii: snap.radii };
     // Studio casts are published: give them canonical proportions now, so the
@@ -1328,6 +1358,7 @@ export class HandcastSystem extends createSystem({}) {
 
   private enterXR(): void {
     this.frameRate.begin(this.world.session);
+    this.perfEvent('enter');
     if (this.mode === 'demo') {
       // Start the board fresh: the attract demo's glass hands are not the player's.
       this.mode = 'play';
@@ -1347,10 +1378,56 @@ export class HandcastSystem extends createSystem({}) {
     });
   }
 
+  private perfEvent(kind: PerfEventKind, detail = ''): void {
+    this.perfStats?.event(kind, detail);
+  }
+
+  private perfFrame(delta: number, time: number): void {
+    const stats = this.perfStats!;
+    const rate = this.frameRate.rate;
+    if (rate !== this.perfRate) {
+      if (this.perfRate) stats.event('rate', `${this.perfRate}->${rate}`);
+      this.perfRate = rate;
+    }
+    stats.frame(delta, rate);
+    for (let i = 0; i < this.live.length; i++) {
+      const l = this.live[i];
+      const h = this.perfHands[i];
+      h.tracked = l.hand.tracked;
+      h.lostFor = l.lostFor;
+      h.mode = l.optic?.mode ?? null;
+      h.still = l.hand.stillness.still;
+      h.progress = l.progress;
+    }
+    const info = this.world.renderer.info.render;
+    this.perfOverlay?.update(time, { rate, calls: info.calls, triangles: info.triangles, board: this.level?.id ?? '-', casts: this.casts.length, paused: this.paused }, this.perfHands);
+  }
+
+  /** After a `?perf=1` session: keep the report and show it on the 2D page. */
+  private reportPerf(): void {
+    const stats = this.perfStats;
+    if (!stats || stats.time < 1) return;
+    stats.event('exit');
+    const header = `HANDCAST perf report ${new Date().toISOString().slice(0, 16)}  ${navigator.userAgent.match(/Quest[^;)]*/)?.[0] ?? navigator.userAgent.slice(0, 60)}`;
+    const text = stats.summary(header);
+    try {
+      localStorage.setItem('handcast.perfReport', text);
+    } catch {
+      /* storage full or blocked: the on-page report is enough */
+    }
+    console.info(text);
+    showPerfReport(text);
+    this.perfStats = new PerfStats();
+    this.perfOverlay?.dispose();
+    this.perfOverlay = new PerfOverlay(this.perfStats);
+    if (this.level) this.perfOverlay.attach(this.benchRoot, this.level.bench.w, this.level.bench.d);
+  }
+
   private setPaused(on: boolean): void {
     if (on === this.paused) return;
     this.paused = on;
     this.audio.setDucked(on);
+    this.perfEvent(on ? 'pause' : 'resume');
     if (!on) return;
     // Whatever the hands were doing ends here: a held glass hand is set down,
     // a pour in progress drains, and tracking restarts fresh on return (the
@@ -1372,6 +1449,7 @@ export class HandcastSystem extends createSystem({}) {
 
   private exitXR(): void {
     this.frameRate.end();
+    this.reportPerf();
     this.placed = false;
     this.calibrating = false;
     this.pendingPlace = false;
@@ -1452,6 +1530,7 @@ export class HandcastSystem extends createSystem({}) {
 
   /** `persist`: a real calibration (save the table anchor); false for a head-relative fallback. */
   private finishPlacement(persist = true): void {
+    this.perfEvent('placed', persist ? 'hand on table' : 'in front, no table');
     this.calibrating = false;
     this.placed = true;
     this.fallbackPlaced = !persist;
@@ -1552,6 +1631,7 @@ export class HandcastSystem extends createSystem({}) {
           this.v2.set(0, 0, -1).applyQuaternion(this.q1).setY(0);
           this.benchRoot.rotation.set(0, Math.atan2(-this.v2.x, -this.v2.z), 0);
           this.placed = true;
+          this.perfEvent('placed', 'saved anchor');
           this.pendingPlace = false;
           this.fallbackPlaced = false;
           this.benchRoot.visible = true;
@@ -1619,6 +1699,7 @@ export class HandcastSystem extends createSystem({}) {
     const xr = this.world.renderer.xr.isPresenting;
     if (xr) {
       this.frameRate.sample(delta);
+      if (this.perfStats) this.perfFrame(delta, time);
       this.readHead();
     } else {
       this.world.camera.getWorldPosition(this.headPos);
@@ -1866,6 +1947,7 @@ export class HandcastSystem extends createSystem({}) {
         this.world.launchXR();
       },
       xrActive: () => this.world.renderer.xr.isPresenting,
+      exitXR: () => this.world.exitXR(),
       frameRate: () => this.frameRate.rate,
       /** Simulates the Quest system menu opening (true) or closing (false) in IWER. */
       systemMenu: async (open: boolean) => {

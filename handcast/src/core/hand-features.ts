@@ -15,6 +15,8 @@ import { NO_TINT } from './types.js';
 /** Optional per-hand memory so finger extension has hysteresis across frames. */
 export interface FeatureState {
   extended: boolean[];
+  /** Filled when present: each finger's straightness ratio (reach / chain length), for tuning overlays. */
+  ratio?: number[];
 }
 
 export interface OpticOptions {
@@ -118,6 +120,7 @@ export function computeOptic(pose: HandPose, opts: OpticOptions): HandOptic {
     const ktLen = len(kt);
     const reach = thumb ? len(sub(T, joint(pos, base))) : ktLen;
     const s = L > 1e-9 ? reach / L : 0;
+    if (state?.ratio) state.ratio[f] = s;
     const was = state ? state.extended[f] : false;
     const threshold = thumb
       ? was ? FEATURE.thumbExit : FEATURE.thumbEnter
