@@ -74,6 +74,11 @@ Ve anotando lo que pase en cada paso. Frases cortas bastan.
 9. **Panel.** ¿Lees bien el panel oscuro (título, frase, botones) sin forzar
    la vista? ¿Y los números del Menu? Activa Menu > **Large text** y dime si
    mejora o si algo se sale del panel.
+   - **Mirar y pellizcar:** mira un botón del Menu sin apuntarle con la mano y
+     pellizca (índice con pulgar) con la mano en el regazo. ¿Se pulsa?
+   - **Tour:** en el Menu, la fila dorada **TOUR** (1 a 6) es el recorrido que
+     verán los jueces. Juega al menos 1, 2 y 6 (*Count to Ten*) y dime si alguno
+     se atasca.
 10. **Salir.** Sal de la sesión inmersiva (botón Meta y la opción de salir del modo inmersivo). En la página 2D
    aparecerá el **informe de rendimiento**. Pulsa **Copy report** y pégamelo
    en el chat. Si copiar no funciona, hazle una foto o captura.
@@ -93,6 +98,7 @@ Ve anotando lo que pase en cada paso. Frases cortas bastan.
   7. ¿Volver del menú del sistema mantuvo la partida?
   8. ¿La grabación del visor capturó passthrough, juego y sonido?
   9. ¿Se lee bien el panel y el Menu? ¿Y con Large text?
+  10. ¿Mirar y pellizcar pulsa los botones? ¿Algún tablero del Tour se atasca?
 - Si puedes, un clip corto del momento en que la mano se convierte en cristal.
 
 ## Si algo va mal
