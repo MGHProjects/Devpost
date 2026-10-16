@@ -211,7 +211,7 @@ d('campaign x Worker', () => {
     let n = 0;
     for (const level of CAMPAIGN) {
       // A fresh DB and device per board keeps the per-device publish rate limit out of the way.
-      const env: Env = { HALL: fakeD1(), ALLOWED_ORIGIN: ORIGIN };
+      const env: Env = { HALL: fakeD1(), ALLOWED_ORIGIN: ORIGIN, HASH_SALT: 'test-salt' };
       const device = `device-int2-${String(n).padStart(4, '0')}`;
       const ip = `10.2.${n >> 8}.${n & 255}`;
       n++;
