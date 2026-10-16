@@ -1321,7 +1321,8 @@ export class HandcastSystem extends createSystem({}) {
       if (this.world.session !== session) return;
       this.restoreDone = true;
       this.restoreAt = this.time;
-      if (!found && !this.progress.calibrated) this.startCalibration();
+      // Already placed meanwhile (a fallback or a scripted placement): keep it.
+      if (!found && !this.progress.calibrated && !this.placed) this.startCalibration();
     });
   }
 
