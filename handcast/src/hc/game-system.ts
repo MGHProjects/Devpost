@@ -69,6 +69,9 @@ const BENCH_MARGIN = 0.06;
 const WITHDRAW = 0.07; // after casting, move this far before the same hand can cast again
 const PLUCK_NOTES = [74, 69, 67, 71, 76];
 const CALIB_FALLBACK = 15; // s without a flat hand: put the bench in front of the player
+/** Seconds for the bench to pour out of the palm that found the table (re-pour from an anchor: shorter). */
+const POUR_FIRST = 2.6;
+const POUR_AGAIN = 1.0;
 /** Stillness tolerances: normal, and Steady mode (for tremor: wider, more forgiving). */
 const STILL_NORMAL = { tolPalm: 0.007, tolTip: 0.01, tolAngle: (4 * Math.PI) / 180, outliers: 1 };
 const STILL_STEADY = { tolPalm: 0.014, tolTip: 0.02, tolAngle: (8 * Math.PI) / 180, outliers: 3 };
@@ -190,6 +193,13 @@ export class HandcastSystem extends createSystem({}) {
   private pendingPlace = false;
   private calibrating = false;
   private calibHold = 0;
+  /** Calibration: a ghost glass hand pressing flat on the table, in a loop (no sentence needed). */
+  private calibGhost: CastView | null = null;
+  private calibAnchor = new Group();
+  /** Bench-space point the next placement pours from (null: the bench centre). */
+  private pourFrom: V2 | null = null;
+  /** After a placement, hands already on the bench must lift off before they can cast. */
+  private lockAfterPlace = false;
   /** Seconds spent in the current calibration (fallback placement after CALIB_FALLBACK). */
   private calibTime = 0;
   private enterButton: EnterXRButton | null = null;
@@ -221,6 +231,7 @@ export class HandcastSystem extends createSystem({}) {
   private worldToBench = new Matrix4();
   private v1 = new Vector3();
   private v2 = new Vector3();
+  private v3 = new Vector3();
   private headPos = new Vector3();
   private headFwd = new Vector3();
   private headUp = new Vector3();
@@ -230,6 +241,8 @@ export class HandcastSystem extends createSystem({}) {
   init(): void {
     this.benchRoot.name = 'bench-root';
     this.benchEntity = this.world.createTransformEntity(this.benchRoot, { persistent: true });
+    this.calibAnchor.visible = false;
+    this.world.createTransformEntity(this.calibAnchor, { persistent: true });
     this.world.scene.add(this.ambience.group);
     this.benchRoot.add(this.cursor.group);
     this.cleanupFuncs.push(() => this.cursor.dispose());
@@ -1129,7 +1142,8 @@ export class HandcastSystem extends createSystem({}) {
       this.updatePluck(l, dt);
 
       if (l.lockFoot && (!near || Math.hypot(pc[0] - l.lockFoot[0], pc[2] - l.lockFoot[1]) > WITHDRAW)) l.lockFoot = null;
-      const active = near && !l.grab && !l.studioPinch && this.mode !== 'demo';
+      if (this.lockAfterPlace && near) l.lockFoot = [pc[0], pc[2]];
+      const active = near && !l.grab && !l.studioPinch && this.mode !== 'demo' && !this.bench.pouring;
       l.optic = active ? computeOptic(h.toPose(), { id: `live-${h.hand}`, live: true, state: l.feat }) : null;
       if (!active || l.lockFoot) {
         this.setCasting(l, Math.max(0, l.progress - dt * 3));
@@ -1153,6 +1167,7 @@ export class HandcastSystem extends createSystem({}) {
       }
       if (l.progress >= 1) this.commitCast(l);
     }
+    this.lockAfterPlace = false;
   }
 
   private isLit(o: HandOptic): boolean {
@@ -1452,6 +1467,7 @@ export class HandcastSystem extends createSystem({}) {
     this.reportPerf();
     this.placed = false;
     this.calibrating = false;
+    this.hideCalibGhost();
     this.pendingPlace = false;
     this.table.reset();
     for (const l of this.live) {
@@ -1472,6 +1488,24 @@ export class HandcastSystem extends createSystem({}) {
     else if (this.level) this.loadLevel(this.level);
   }
 
+  /** Visual only: the bench floods out from `at` and its lamps and crystals ring a rising arpeggio. */
+  private pourBench(at: V2, seconds: number): void {
+    const bench = this.bench;
+    if (!bench) return;
+    const chord = [...this.notes].sort((a, b) => a - b);
+    if (!chord.length) {
+      const t = this.source.tonic(this.level, this.levelIndex) ?? 60;
+      chord.push(t, t + 4, t + 7);
+    }
+    let rung = 0;
+    bench.pour(at, seconds, (kind, i) => {
+      if (kind !== 'lamp' && kind !== 'crystal') return;
+      const note = chord[rung % chord.length] + 12 * Math.floor(rung / chord.length);
+      rung++;
+      this.audio.bell(note, this.benchPos(bench.worldOf(kind, i, this.v3), this.v3), 0.45, 2.2);
+    });
+  }
+
   private startCalibration(): void {
     if (!this.world.renderer.xr.isPresenting) return;
     this.calibrating = true;
@@ -1479,11 +1513,50 @@ export class HandcastSystem extends createSystem({}) {
     this.calibTime = 0;
     this.benchRoot.visible = false;
     this.hud.show('calibrate');
-    this.hud.setBoard('SET UP', 'Find your table', 'Rest one hand flat on your table and hold still.');
+    this.hud.setBoard('SET UP', 'Find your table', 'Rest a hand flat on the table, like the glass one. Hold still.');
+    this.showCalibGhost();
+  }
+
+  private showCalibGhost(): void {
+    if (this.calibGhost || !this.templates) return;
+    const ghost = new CastView(this.templates, canonicalPose('flat', 'right', [0, 0]), 'ghost', { subdivide: 0 });
+    this.calibGhost = ghost;
+    this.calibAnchor.add(ghost.root);
+    this.calibAnchor.visible = true;
+  }
+
+  private hideCalibGhost(): void {
+    this.calibGhost?.dispose();
+    this.calibGhost = null;
+    this.calibAnchor.visible = false;
+  }
+
+  /** Ghost hand ahead of the head at a guessed table height, pressing down 3 cm every 2 s. */
+  private updateCalibGhost(dt: number): void {
+    const g = this.calibGhost;
+    if (!g) {
+      if (this.templates) this.showCalibGhost();
+      return;
+    }
+    this.readHead();
+    const f = this.v1.copy(this.headFwd).setY(0);
+    if (f.lengthSq() < 1e-4) f.set(0, 0, -1);
+    f.normalize();
+    const cycle = (this.calibTime % 2) / 2;
+    const press = cycle < 0.35 ? cycle / 0.35 : cycle < 0.75 ? 1 : 1 - (cycle - 0.75) / 0.25;
+    const ease = press * press * (3 - 2 * press);
+    this.calibAnchor.position.copy(this.headPos).addScaledVector(f, 0.42);
+    this.calibAnchor.position.y = Math.max(0.45, this.headPos.y - 0.45) + 0.03 * (1 - ease);
+    this.calibAnchor.rotation.set(0, Math.atan2(-f.x, -f.z), 0);
+    // Fades while a real hand is resting (it is doing the job now).
+    const resting = Math.min(1, this.calibHold / 0.3);
+    g.setOpacity((0.35 + 0.25 * ease) * (1 - resting));
+    g.update(dt, this.time);
   }
 
   private updateCalibration(dt: number): void {
     this.calibTime += dt;
+    this.updateCalibGhost(dt);
     if (this.calibTime > CALIB_FALLBACK) {
       // No table found: play anyway, on a bench in front of the player. Menu > Table tries again.
       this.placeInFront();
@@ -1504,9 +1577,20 @@ export class HandcastSystem extends createSystem({}) {
         const d = Math.hypot(p[t * 3] - p[k * 3], p[t * 3 + 1] - p[k * 3 + 1], p[t * 3 + 2] - p[k * 3 + 2]);
         if (d > 0.06) straight++;
       }
-      if (!(flat && straight >= 3 && h.stillness.still)) continue;
+      const l = this.live.find((x) => x.hand === h);
+      if (!(flat && straight >= 3 && h.stillness.still)) {
+        if (l && l.progress > 0) this.setCasting(l, 0);
+        continue;
+      }
       this.calibHold += dt;
+      // The resting hand glows with the same molten coat as a cast: before any
+      // puzzle, "hold still = glass" is already learned.
+      if (l) {
+        this.ensureCoat(l);
+        this.setCasting(l, Math.min(1, this.calibHold / 0.8));
+      }
       if (this.calibHold < 0.8) return;
+      if (l) this.setCasting(l, 0);
       // posBench is world space while calibrating.
       const p = h.posBench;
       let y = 0;
@@ -1522,16 +1606,25 @@ export class HandcastSystem extends createSystem({}) {
       const fz = -Math.cos(yaw);
       this.benchRoot.position.set(c[0] + fx * 0.02, y - 0.002, c[2] + fz * 0.02);
       this.benchRoot.rotation.set(0, yaw, 0);
+      this.benchRoot.updateWorldMatrix(true, false);
+      // The bench pours out from under the palm that found the table.
+      const local = this.benchRoot.worldToLocal(this.v2.set(c[0], y, c[2]));
+      this.pourFrom = [local.x, local.z];
       this.finishPlacement();
       return;
     }
     this.calibHold = Math.max(0, this.calibHold - dt);
+    if (this.calibHold === 0) for (const l of this.live) if (l.progress > 0) this.setCasting(l, 0);
   }
 
   /** `persist`: a real calibration (save the table anchor); false for a head-relative fallback. */
-  private finishPlacement(persist = true): void {
+  private finishPlacement(persist = true, pour = true): void {
     this.perfEvent('placed', persist ? 'hand on table' : 'in front, no table');
     this.calibrating = false;
+    this.hideCalibGhost();
+    this.lockAfterPlace = true;
+    if (pour) this.pourBench(this.pourFrom ?? [0, 0], POUR_FIRST);
+    this.pourFrom = null;
     this.placed = true;
     this.fallbackPlaced = !persist;
     this.pendingPlace = false;
@@ -1551,7 +1644,7 @@ export class HandcastSystem extends createSystem({}) {
   }
 
   /** Head-relative fallback placement (no calibration). */
-  placeInFront(tableY?: number): void {
+  placeInFront(tableY?: number, pour = true): void {
     this.readHead();
     const f = this.v1.copy(this.headFwd).setY(0);
     if (f.lengthSq() < 1e-4) f.set(0, 0, -1);
@@ -1560,7 +1653,7 @@ export class HandcastSystem extends createSystem({}) {
     this.benchRoot.position.y = tableY ?? Math.max(0.45, this.headPos.y - 0.45);
     this.benchRoot.rotation.set(0, Math.atan2(-f.x, -f.z), 0);
     // A floating, head-relative bench is not the player's table: do not anchor it.
-    this.finishPlacement(false);
+    this.finishPlacement(false, pour);
   }
 
   private deskView = 0;
@@ -1632,6 +1725,8 @@ export class HandcastSystem extends createSystem({}) {
           this.benchRoot.rotation.set(0, Math.atan2(-this.v2.x, -this.v2.z), 0);
           this.placed = true;
           this.perfEvent('placed', 'saved anchor');
+          if (!this.fallbackPlaced) this.pourBench([0, 0], POUR_AGAIN);
+          this.lockAfterPlace = true;
           this.pendingPlace = false;
           this.fallbackPlaced = false;
           this.benchRoot.visible = true;
@@ -1844,6 +1939,8 @@ export class HandcastSystem extends createSystem({}) {
         drag: this.studio?.drag ?? null,
         cursor: this.cursor.group.visible ? this.cursor.group.children.map((c) => [c.visible, ...c.getWorldPosition(new Vector3()).toArray().map((v) => +v.toFixed(3))]) : null,
         calibrating: this.calibrating,
+        calibGhost: !!this.calibGhost,
+        pouring: !!this.bench?.pouring,
         placed: this.placed,
         crystals: this.display?.crystals.map((c) => c.state),
         hush: this.display?.hush.map((h) => h.awake),
@@ -1931,8 +2028,19 @@ export class HandcastSystem extends createSystem({}) {
       clearCasts: () => {
         for (const c of [...this.casts]) this.shatterCast(c);
       },
-      placeInFront: (y?: number) => this.placeInFront(y),
+      /** Head-relative placement; no pour unless asked (tests start playing at once). */
+      placeInFront: (y?: number, pour = false) => this.placeInFront(y, pour),
       calibrate: () => this.startCalibration(),
+      /** What the table set-up sees of each tracked hand (palm normal y, knuckle-to-tip lengths, stillness). */
+      calibProbe: () =>
+        this.tracker.hands.map((h) => {
+          const p = h.posBench;
+          const len = [6, 11, 16, 21].map((k, i) => {
+            const t = [9, 14, 19, 24][i];
+            return +Math.hypot(p[t * 3] - p[k * 3], p[t * 3 + 1] - p[k * 3 + 1], p[t * 3 + 2] - p[k * 3 + 2]).toFixed(4);
+          });
+          return { hand: h.hand, tracked: h.tracked, ny: +h.palm.normal[1].toFixed(3), len, still: h.stillness.still, hold: this.calibHold };
+        }),
       benchWorld: () => this.benchRoot.matrixWorld.toArray(),
       benchToWorld: (p: [number, number, number]) => this.benchRoot.localToWorld(new Vector3(...p)).toArray(),
       footWorld: (i: number) => {

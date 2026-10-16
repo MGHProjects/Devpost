@@ -21,7 +21,7 @@ import {
   Vector3,
   BufferGeometry,
 } from '@iwsdk/core';
-import type { ColorMask, LevelDef, TargetState } from '../../core/types.js';
+import type { ColorMask, LevelDef, TargetState, V2 } from '../../core/types.js';
 import {
   BillboardCloud,
   CrystalProp,
@@ -238,11 +238,21 @@ const slabFragment = /* glsl */ `
   uniform float uWave;
   uniform float uRim;
   uniform vec3 uRimColor;
+  uniform float uPour;
+  uniform vec2 uPourAt;
   varying vec2 vP;
   varying vec3 vWorld;
   varying vec3 vWorldN;
   float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
   void main() {
+    // Pour: the slab exists only inside a growing radius around the palm that
+    // made it, with a white-hot molten front that cools to amber behind it.
+    float pourBand = 0.0;
+    if (uPour >= 0.0) {
+      float pd = length(vP - uPourAt) + (hash(floor(vP * 300.0)) - 0.5) * 0.002;
+      if (pd > uPour) discard;
+      pourBand = exp(-pow((uPour - pd) / 0.014, 2.0));
+    }
     vec2 q = abs(vP) - uHalf;
     float outside = max(q.x, q.y);
     float wave = 0.0;
@@ -254,7 +264,8 @@ const slabFragment = /* glsl */ `
       // soft rim light spilling onto the real table
       float halo = (exp(-outside / 0.006) * 0.35 + exp(-outside / 0.02) * 0.12) * uRim;
       halo *= 1.0 - smoothstep(0.03, 0.045, outside);
-      gl_FragColor = vec4(uRimColor, clamp(halo + wave * 0.2, 0.0, 1.0));
+      vec3 hc = mix(uRimColor, vec3(1.0, 0.62, 0.22), pourBand);
+      gl_FragColor = vec4(hc, clamp(halo + wave * 0.2 + pourBand * 0.5 * (1.0 - smoothstep(0.0, 0.045, outside)), 0.0, 1.0));
       return;
     }
     vec2 uv = vec2(vP.x / (2.0 * uHalf.x) + 0.5, 0.5 - vP.y / (2.0 * uHalf.y));
@@ -274,6 +285,9 @@ const slabFragment = /* glsl */ `
     float rim = exp(-edge / 0.0018) * 0.9 + exp(-edge / 0.01) * 0.18;
     vec3 col = base + sheen + lines + uRimColor * (rim * uRim + wave * 0.5);
     float alpha = clamp(0.62 + rim * 0.3 + dot(lines, vec3(0.3)) + fres * 0.2, 0.0, 1.0);
+    vec3 molten = mix(vec3(1.0, 0.45, 0.12), vec3(1.0, 0.96, 0.86), pourBand * pourBand);
+    col = mix(col, molten * 1.6, pourBand * 0.85);
+    alpha = max(alpha, pourBand);
     gl_FragColor = vec4(col, alpha);
   }
 `;
@@ -306,6 +320,17 @@ export class BenchView {
   private halos: BillboardCloud;
   private motes: BillboardCloud;
   private lampOn: number[] = [];
+  private body: Mesh;
+  /** Pour state: seconds since start (-1 = not pouring), origin, length, reach. */
+  private pourT = -1;
+  private pourDur = 0;
+  private pourMax = 0;
+  private pourAt = new Vector2();
+  private pourItems: { kind: BenchPropKind; i: number; group: Group; dist: number; shown: boolean; grow: boolean }[] = [];
+  private pourOrder = 0;
+  private onReveal: ((kind: BenchPropKind, i: number, order: number) => void) | null = null;
+  /** Halo strength per prop while pouring (1 = fully revealed), indexed like the halo cloud. */
+  private haloReveal: Float32Array;
   private solveT = -1;
   private boost = 0;
   // mote particles (struct of arrays)
@@ -323,7 +348,7 @@ export class BenchView {
     // slab: dark glass sides (top/bottom faces hidden) plus the engraved top
     const hidden = new MeshBasicMaterial({ visible: false });
     const side = new MeshBasicMaterial({ color: 0x07080e, transparent: true, opacity: 0.88, depthWrite: false });
-    const body = new Mesh(new BoxGeometry(w, 0.006, d), [side, side, hidden, hidden, side, side]);
+    const body = (this.body = new Mesh(new BoxGeometry(w, 0.006, d), [side, side, hidden, hidden, side, side]));
     body.position.y = -0.0035;
     body.renderOrder = -11;
     this.chart = drawStarChart(w, d, hashString(level.id || 'bench'));
@@ -338,6 +363,8 @@ export class BenchView {
         uWave: { value: 0 },
         uRim: { value: 1 },
         uRimColor: { value: RIM_COLOR.clone() },
+        uPour: { value: -1 },
+        uPourAt: { value: new Vector2() },
       },
       transparent: true,
       depthWrite: false,
@@ -394,8 +421,93 @@ export class BenchView {
 
     const haloCount = this.lamps.length + this.wells.length + this.crystals.length + this.hush.length;
     this.halos = new BillboardCloud(Math.max(1, haloCount), 12, 12);
+    this.haloReveal = new Float32Array(Math.max(1, haloCount)).fill(1);
     this.motes = new BillboardCloud(MAX_MOTES, 40, 13);
     this.root.add(this.halos.mesh, this.motes.mesh);
+  }
+
+  /**
+   * The bench pours out from `at` (bench-space x, z): the slab grows as a disc
+   * with a molten front and each prop appears as the front reaches it, calling
+   * `onReveal` in reveal order (for the arpeggio). Purely visual.
+   */
+  pour(at: V2, seconds: number, onReveal?: (kind: BenchPropKind, i: number, order: number) => void): void {
+    const { w, d } = this.level.bench;
+    const margin = 0.045;
+    this.pourAt.set(at[0], at[1]);
+    let far = 0;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) far = Math.max(far, Math.hypot(sx * (w / 2 + margin) - at[0], sz * (d / 2 + margin) - at[1]));
+    this.pourMax = far;
+    this.pourDur = Math.max(0.2, seconds);
+    this.pourT = 0;
+    this.pourOrder = 0;
+    this.onReveal = onReveal ?? null;
+    const L = this.level;
+    const items: typeof this.pourItems = [];
+    const add = (kind: BenchPropKind, i: number, group: Group, p: V2, grow = false) =>
+      items.push({ kind, i, group, dist: Math.hypot(p[0] - at[0], p[1] - at[1]), shown: false, grow });
+    this.lamps.forEach((l, i) => add('lamp', i, l.group, L.lamps[i].p));
+    this.wells.forEach((wl, i) => add('well', i, wl.group, L.wells[i].p));
+    this.crystals.forEach((c, i) => add('crystal', i, c.prop.group, L.crystals[i].p, true));
+    this.hush.forEach((h, i) => add('hush', i, h.group, L.hush[i].p));
+    this.walls.forEach((p, i) => add('wall', i, p.group, p.mid));
+    this.mirrors.forEach((p, i) => add('mirror', i, p.group, p.mid));
+    items.sort((a, b) => a.dist - b.dist);
+    this.pourItems = items;
+    for (const it of items) it.group.visible = false;
+    this.lamps.forEach((l) => l.setActive(false));
+    this.haloReveal.fill(0);
+    this.body.visible = false;
+    this.slabMat.uniforms.uPourAt.value.copy(this.pourAt);
+    this.slabMat.uniforms.uPour.value = 0;
+  }
+
+  /** True while the bench is still pouring out. */
+  get pouring(): boolean {
+    return this.pourT >= 0;
+  }
+
+  private updatePour(dt: number): void {
+    this.pourT += dt;
+    const u = Math.min(1, this.pourT / this.pourDur);
+    // Fast out of the palm, slowing as it reaches the corners.
+    const r = this.pourMax * (1 - (1 - u) * (1 - u));
+    this.slabMat.uniforms.uPour.value = r;
+    const nl = this.lamps.length;
+    const nw = this.wells.length;
+    const nc = this.crystals.length;
+    for (const it of this.pourItems) {
+      const f = Math.max(0, Math.min(1, (r - it.dist) / 0.05));
+      if (f > 0 && !it.shown) {
+        it.shown = true;
+        it.group.visible = true;
+        if (it.kind === 'lamp') this.lamps[it.i].setActive(this.lampOn[it.i] > 0);
+        this.onReveal?.(it.kind, it.i, this.pourOrder++);
+      }
+      if (!it.shown) continue;
+      // Crystals grow up out of the glass with a small overshoot; the rest swell in.
+      const e = 1 - (1 - f) * (1 - f);
+      if (it.grow) it.group.scale.set(0.7 + 0.3 * e, Math.max(0.001, e * (1 + 0.12 * Math.sin(f * Math.PI))), 0.7 + 0.3 * e);
+      else it.group.scale.setScalar(Math.max(0.001, 0.6 + 0.4 * e));
+      const h = it.kind === 'lamp' ? it.i : it.kind === 'well' ? nl + it.i : it.kind === 'crystal' ? nl + nw + it.i : it.kind === 'hush' ? nl + nw + nc + it.i : -1;
+      if (h >= 0) this.haloReveal[h] = f;
+    }
+    if (u >= 1 && r >= this.pourMax) {
+      this.pourT = -1;
+      this.slabMat.uniforms.uPour.value = -1;
+      this.body.visible = true;
+      for (const it of this.pourItems) {
+        if (!it.shown) {
+          it.group.visible = true;
+          if (it.kind === 'lamp') this.lamps[it.i].setActive(this.lampOn[it.i] > 0);
+          this.onReveal?.(it.kind, it.i, this.pourOrder++);
+        }
+        it.group.scale.setScalar(1);
+      }
+      this.haloReveal.fill(1);
+      this.pourItems = [];
+      this.onReveal = null;
+    }
   }
 
   setCrystal(i: number, state: TargetState, received: ColorMask): void {
@@ -411,7 +523,10 @@ export class BenchView {
   }
 
   setLampActive(i: number, on: boolean): void {
-    this.lamps[i]?.setActive(on);
+    if (i >= this.lampOn.length) return;
+    this.lampOn[i] = on ? 1 : 0;
+    // While pouring, a lamp lights when the front reaches it.
+    if (this.pourT < 0 || this.lamps[i].group.visible) this.lamps[i].setActive(on);
   }
 
   highlightCrystal(i: number, on: boolean): void {
@@ -479,6 +594,8 @@ export class BenchView {
   update(dt: number, time: number): void {
     this.time.value = time;
     const t = time;
+    if (this.pourT >= 0) this.updatePour(dt);
+    const hr = this.haloReveal;
 
     // solve flourish
     if (this.solveT >= 0) {
@@ -509,13 +626,14 @@ export class BenchView {
         c.r,
         c.g,
         c.b,
-        on * (0.55 + 0.05 * Math.sin(t * 5.1 + i)),
+        on * (0.55 + 0.05 * Math.sin(t * 5.1 + i)) * hr[h - 1],
       );
     }
     for (let i = 0; i < this.wells.length; i++) {
       const wl = this.level.wells[i];
       const c = lightColor(wl.color);
-      halos.set(h++, wl.p[0], 0.006, wl.p[1], wl.r * 3.4, c.r, c.g, c.b, 0.2 + 0.05 * Math.sin(t * 1.3 + i * 2));
+      halos.set(h, wl.p[0], 0.006, wl.p[1], wl.r * 3.4, c.r, c.g, c.b, (0.2 + 0.05 * Math.sin(t * 1.3 + i * 2)) * hr[h]);
+      h++;
     }
 
     // crystals
@@ -578,7 +696,7 @@ export class BenchView {
         c.color.r,
         c.color.g,
         c.color.b,
-        0.08 + shown * 0.42,
+        (0.08 + shown * 0.42) * hr[h - 1],
       );
     }
 
@@ -602,7 +720,7 @@ export class BenchView {
         HUSH_COLOR.r,
         HUSH_COLOR.g,
         HUSH_COLOR.b,
-        s.open * (0.75 + 0.25 * Math.sin(t * 9)),
+        s.open * (0.75 + 0.25 * Math.sin(t * 9)) * hr[h - 1],
       );
     }
     halos.commit(h);

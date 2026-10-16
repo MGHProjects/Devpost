@@ -129,5 +129,32 @@ export default async function run({ page, frame }) {
   st = await hc(() => window.handcast.state());
   check('blade hand casts a glass mirror that solves Mirror Palm 1', blade && st.casts === 1, `mode=${st.live[1].mode} crystals=${st.crystals} casts=${st.casts}`);
   await hc(() => window.handcast.iwerHand('right', null));
+
+  // 7. Table set-up: a ghost hand shows the gesture, the resting hand glows like a
+  // cast, the bench pours out from under the palm, and that hand cannot cast until
+  // it lifts off.
+  await hc(() => window.handcast.load(0));
+  await wait(300);
+  // The parked left hand stays tracked (flat, palm down) in IWER: curl it into a
+  // fist off the table so only the right hand can find the table.
+  await hc(() => window.handcast.iwerHand('left', 'fist', [-0.35, 0.25]));
+  await hc(() => window.handcast.calibrate());
+  await wait(500);
+  const ghost = (await hc(() => window.handcast.state())).calibGhost;
+  await hc((yaw) => window.handcast.iwerHand('right', 'flat', [0, 0.06], yaw), FWD);
+  const glow = await waitFor(() => {
+    const s = window.handcast.state();
+    return s.calibrating && s.live[1].progress > 0.25;
+  }, 10000);
+  const placedOk = await waitFor(() => window.handcast.state().placed && !window.handcast.state().calibrating, 12000);
+  st = await hc(() => window.handcast.state());
+  check('set-up: a ghost hand shows the gesture and the resting hand glows', ghost && glow, `ghost=${ghost} glow=${glow}`);
+  check('set-up: the bench pours out from under the palm', placedOk && st.pouring, `placed=${st.placed} pouring=${st.pouring} ghostLeft=${st.calibGhost}`);
+  await waitFor(() => !window.handcast.state().pouring, 20000);
+  await wait(2500);
+  st = await hc(() => window.handcast.state());
+  check('the hand that found the table does not cast until it lifts off', st.casts === 0 && !st.pouring, `casts=${st.casts} progress=${st.live[1].progress}`);
+  await hc(() => window.handcast.iwerHand('right', null));
+  await hc(() => window.handcast.iwerHand('left', null));
   return out.join('\n');
 }
