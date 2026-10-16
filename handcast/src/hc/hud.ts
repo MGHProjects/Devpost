@@ -3,13 +3,17 @@
  * section toggling and button wiring; game logic lives in the game system.
  */
 
-import { UIKitMLAsset, World } from '@iwsdk/core';
+import { UIKit, UIKitMLAsset, World } from '@iwsdk/core';
+import type { ColorMask } from '../core/types.js';
+import { lightColor } from '../render/bench/props.js';
 
 type El = {
   setProperties(props: Record<string, unknown>): void;
   addEventListener(type: string, fn: () => void): void;
   removeEventListener(type: string, fn: () => void): void;
 };
+
+type ClassList = { contains(name: string): boolean; add(name: string): void; remove(name: string): void };
 
 export type HudSection = 'play' | 'menu' | 'studio' | 'hall' | 'calibrate';
 
@@ -32,6 +36,8 @@ export interface HudHandlers {
   hall(): void;
   sound(): void;
   assist(): void;
+  /** Large text, high contrast (accessibility). */
+  contrast(): void;
   recenter(): void;
   tool(name: 'lamp' | 'well' | 'hush' | 'wall' | 'erase'): void;
   studioUndo(): void;
@@ -54,14 +60,61 @@ const SECTIONS: Record<HudSection, string[]> = {
   hall: ['hall', 'hall-actions'],
 };
 
+/**
+ * Classes with a "-hc" (Large text, high contrast) variant in hud.uikitml.
+ * Runtime-set colours (chips, menu cells, tools) are chosen per mode below.
+ */
+const HC_CLASSES = [
+  'root', 'fixed-w', 'eyebrow', 'title', 'status', 'chip', 'chip-t', 'chip-k', 'glass-token', 'button-label', 'wide-btn',
+  'movement-label', 'cell-btn', 'cell-label', 'hall-row', 'hall-name', 'hall-meta', 'code',
+];
+
+/** Night-studio palette (dark glass). Contrast vs the panel (#090d16) is >= 7:1 for text. */
+const ACCENT = '#8fd0ff';
+const INK = '#070a10';
+const TEXT = '#eef2f8';
+const CELL_OPEN = ['rgba(255,255,255,0.08)', '#141a26'];
+const CELL_SOLVED = '#ffd76a';
+const TOOL_IDLE = ['rgba(255,255,255,0.1)', '#1a2130'];
+
+/** Colour letter per light mask: colour is never the only cue. */
+const LETTER: Record<number, string> = { 1: 'R', 2: 'G', 4: 'B', 3: 'Y', 5: 'M', 6: 'C', 7: 'W' };
+const CHIP_HEX: string[] = [];
+const CHIP_DIM: string[] = [];
+for (let m = 0; m < 8; m++) {
+  const c = lightColor(m);
+  CHIP_HEX[m] = `#${c.getHexString()}`;
+  CHIP_DIM[m] = `rgba(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)},0.16)`;
+}
+
+interface Chip {
+  box: El | null;
+  letter: El | null;
+  check: El | null;
+  /** Last applied state: colour mask (-1 = hidden), lit, contrast. */
+  mask: number;
+  lit: boolean;
+  hc: boolean;
+}
+
 export class Hud {
   readonly object: UIKitMLAsset;
   section: HudSection = 'play';
   /** Last status line shown (read by tests). */
   status = '';
+  /** Large text, high contrast mode is on. */
+  contrast = false;
   private cleanup: (() => void)[] = [];
+  private chips: Chip[] = [];
+  private hcTargets: { list: ClassList; cls: string }[] = [];
+  private menuStates: ('solved' | 'open')[] = [];
+  private menuCurrent = -1;
+  private tool: string | null = null;
 
   constructor(world: World, h: HudHandlers) {
+    // Dark glass for the night studio: the Horizon kit's :dark variants (buttons,
+    // panel) follow this, and .root in hud.uikitml sets the exact surface.
+    UIKit.setPreferredColorScheme('dark');
     this.object = world.requireSceneObject<UIKitMLAsset>('hud');
     const bind = (id: string, fn: () => void) => {
       const el = this.el(id);
@@ -81,6 +134,7 @@ export class Hud {
     bind('btn-hall', h.hall);
     bind('btn-sound', h.sound);
     bind('btn-assist', h.assist);
+    bind('btn-contrast', h.contrast);
     bind('btn-recenter', h.recenter);
     bind('btn-drop', h.drop);
     bind('btn-publish', h.publish);
@@ -94,6 +148,14 @@ export class Hud {
     bind('hall-back', h.back);
     for (let i = 0; i < HUD_LEVELS; i++) bind(`lvl-${i}`, () => h.pick(i));
     for (let i = 0; i < HALL_ROWS; i++) bind(`hall-${i}`, () => h.hallPick(i));
+    for (let i = 0; i < METER; i++) {
+      this.chips.push({ box: this.el(`meter-${i}`), letter: this.el(`meter-${i}-t`), check: this.el(`meter-${i}-k`), mask: -2, lit: false, hc: false });
+    }
+    this.object.traverse((o) => {
+      const list = (o as unknown as { classList?: ClassList }).classList;
+      if (!list || typeof list.contains !== 'function') return;
+      for (const cls of HC_CLASSES) if (list.contains(cls)) this.hcTargets.push({ list, cls: `${cls}-hc` });
+    });
     this.show('play');
   }
 
@@ -125,24 +187,48 @@ export class Hud {
     this.set('hud-status', { text: status });
   }
 
-  /** Glass tokens: `left` of `budget` casts remain. */
+  /** Glass tokens: `left` of `budget` casts remain (spent ones are hollow). */
   setBudget(left: number, budget: number): void {
     for (let i = 0; i < TOKENS; i++) {
       this.set(`tok-${i}`, {
         display: i < budget ? 'flex' : 'none',
-        backgroundColor: i < left ? '#8fd0ff' : 'rgba(143,208,255,0.12)',
+        backgroundColor: i < left ? ACCENT : 'rgba(143,208,255,0.1)',
       });
     }
   }
 
-  /** One dot per crystal; lit dots glow in the crystal's colour. */
-  setMeter(colors: (string | null)[]): void {
+  /**
+   * One chip per crystal in its required colour, with its colour letter: dim
+   * and outlined until the crystal is lit by glass, then filled with a check.
+   * Only chips whose state changed are touched (no allocation when idle).
+   */
+  setMeter(crystals: readonly { color: ColorMask }[], lit?: readonly boolean[]): void {
     for (let i = 0; i < METER; i++) {
-      this.set(`meter-${i}`, {
-        display: i < colors.length ? 'flex' : 'none',
-        backgroundColor: colors[i] ?? '#c9ccd4',
-      });
+      const chip = this.chips[i];
+      const mask = i < crystals.length ? crystals[i].color & 7 : -1;
+      const on = mask >= 0 && !!lit?.[i];
+      if (chip.mask === mask && chip.lit === on && chip.hc === this.contrast) continue;
+      this.paintChip(chip, mask, on);
     }
+  }
+
+  private paintChip(chip: Chip, mask: number, on: boolean): void {
+    if (mask < 0) {
+      if (chip.mask !== -1) chip.box?.setProperties({ display: 'none' });
+    } else {
+      const hex = CHIP_HEX[mask];
+      chip.box?.setProperties({
+        display: 'flex',
+        backgroundColor: on ? hex : this.contrast ? '#000000' : CHIP_DIM[mask],
+        borderColor: on && this.contrast ? '#ffffff' : hex,
+        borderWidth: this.contrast ? 4 : 2,
+      });
+      chip.letter?.setProperties({ display: on ? 'none' : 'flex', text: LETTER[mask] ?? '?', color: hex });
+      chip.check?.setProperties({ display: on ? 'flex' : 'none' });
+    }
+    chip.mask = mask;
+    chip.lit = on;
+    chip.hc = this.contrast;
   }
 
   setSolved(solved: boolean, hasNext: boolean, canLike = false): void {
@@ -157,24 +243,55 @@ export class Hud {
 
   /** Highlights the active studio tool (null = none). */
   setTool(active: string | null): void {
+    this.tool = active;
+    const hc = this.contrast ? 1 : 0;
     for (const t of TOOLS) {
       const on = t === active;
-      this.set(`tool-${t}`, { backgroundColor: on ? '#2f6bff' : 'rgba(228,230,235,1)' });
-      this.set(`tool-${t}-t`, { color: on ? '#ffffff' : '#1d1f24' });
+      this.set(`tool-${t}`, { backgroundColor: on ? ACCENT : TOOL_IDLE[hc] });
+      this.set(`tool-${t}-t`, { color: on ? INK : hc ? '#ffffff' : TEXT });
     }
   }
 
-  setMenuState(states: ('solved' | 'open')[], current: number, labels: { daily: string; sound: string; assist: string }): void {
-    states.forEach((st, i) => {
-      if (i >= HUD_LEVELS) return;
-      const bg = i === current ? '#2f6bff' : st === 'solved' ? '#ffd76a' : '#e4e6eb';
-      this.set(`lvl-${i}`, { backgroundColor: bg });
-      this.set(`lvl-${i}-t`, { color: i === current ? '#ffffff' : '#2a2d33' });
-    });
+  setMenuState(
+    states: ('solved' | 'open')[],
+    current: number,
+    labels: { daily: string; sound: string; assist: string; contrast?: string },
+  ): void {
+    this.menuStates = states;
+    this.menuCurrent = current;
+    this.paintMenu();
     for (let i = states.length; i < HUD_LEVELS; i++) this.set(`lvl-${i}`, { display: 'none' });
     this.set('btn-daily-label', { text: labels.daily });
     this.set('btn-sound-label', { text: labels.sound });
     this.set('btn-assist-label', { text: labels.assist });
+    if (labels.contrast !== undefined) this.set('btn-contrast-label', { text: labels.contrast });
+  }
+
+  private paintMenu(): void {
+    const hc = this.contrast ? 1 : 0;
+    const states = this.menuStates;
+    for (let i = 0; i < states.length && i < HUD_LEVELS; i++) {
+      const cur = i === this.menuCurrent;
+      const solved = states[i] === 'solved';
+      this.set(`lvl-${i}`, { backgroundColor: cur ? ACCENT : solved ? CELL_SOLVED : CELL_OPEN[hc] });
+      this.set(`lvl-${i}-t`, { color: cur || solved ? INK : hc ? '#ffffff' : TEXT });
+    }
+  }
+
+  /**
+   * Large text, high contrast: bigger fonts, pure white on near-black and
+   * thicker outlines across the whole HUD, applied immediately.
+   */
+  setContrast(on: boolean): void {
+    if (on === this.contrast) return;
+    this.contrast = on;
+    for (const t of this.hcTargets) {
+      if (on) t.list.add(t.cls);
+      else t.list.remove(t.cls);
+    }
+    for (const chip of this.chips) if (chip.mask >= 0) this.paintChip(chip, chip.mask, chip.lit);
+    this.paintMenu();
+    this.setTool(this.tool);
   }
 
   setStudioStatus(text: string, code?: string): void {

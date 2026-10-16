@@ -8,6 +8,8 @@ export interface Progress {
   muted: boolean;
   /** Longer, more forgiving hold-still for tremor (accessibility). */
   steady: boolean;
+  /** Large text, high contrast HUD (accessibility). */
+  contrast: boolean;
   /** The table has been found once (skip the "rest your hand" step). */
   calibrated: boolean;
 }
@@ -21,6 +23,7 @@ const fresh = (): Progress => ({
   lastDaily: null,
   muted: false,
   steady: false,
+  contrast: false,
   calibrated: false,
 });
 

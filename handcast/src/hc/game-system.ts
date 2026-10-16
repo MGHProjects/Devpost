@@ -269,6 +269,7 @@ export class HandcastSystem extends createSystem({}) {
     }
 
     this.hud = new Hud(this.world, this.hudHandlers());
+    this.hud.setContrast(this.progress.contrast);
     this.cleanupFuncs.push(() => this.hud.dispose());
     if (perfEnabled()) {
       this.perfStats = new PerfStats();
@@ -368,6 +369,12 @@ export class HandcastSystem extends createSystem({}) {
         this.applySteady();
         this.openMenu();
       }),
+      contrast: g(() => {
+        this.progress.contrast = !this.progress.contrast;
+        saveProgress(this.progress);
+        this.hud.setContrast(this.progress.contrast);
+        this.openMenu();
+      }),
       recenter: g(() => {
         this.hud.show('play');
         this.startCalibration();
@@ -397,6 +404,7 @@ export class HandcastSystem extends createSystem({}) {
         daily: this.progress.dailyStreak > 0 ? `Daily x${this.progress.dailyStreak}` : 'Daily',
         sound: this.progress.muted ? 'Muted' : 'Sound',
         assist: this.progress.steady ? 'Steady on' : 'Steady',
+        contrast: this.progress.contrast ? 'Large on' : 'Large text',
       },
     );
     this.hud.show('menu');
@@ -495,7 +503,7 @@ export class HandcastSystem extends createSystem({}) {
     this.hud.setSolved(false, this.hasNext());
     this.hud.setLike(this.hall.hasLiked(level.id) ? 'Liked' : 'Like');
     this.hud.setBudget(level.budget, level.budget);
-    this.hud.setMeter(level.crystals.map(() => null));
+    this.hud.setMeter(level.crystals);
     // The attract demo swaps boards by itself: leave an open Menu / Hall panel alone.
     const browsing = this.hud.section === 'menu' || this.hud.section === 'hall';
     if (!(this.mode === 'demo' && browsing)) this.hud.show(this.mode === 'studio' ? 'studio' : 'play');
@@ -653,7 +661,7 @@ export class HandcastSystem extends createSystem({}) {
     }
     if (meterDirty) {
       this.committed.length = display.crystals.length;
-      this.hud.setMeter(this.committed.map((on, i) => (on ? `#${lightColor(this.level.crystals[i].color).getHexString()}` : null)));
+      this.hud.setMeter(this.level.crystals, this.committed);
     }
     for (let i = 0; i < display.hush.length; i++) {
       const awake = display.hush[i].awake;
@@ -1699,9 +1707,11 @@ export class HandcastSystem extends createSystem({}) {
       this.v1.y -= 0.12;
     } else {
       const d = this.level ? this.level.bench.d : 0.3;
-      // The panel is centred on its position: tall sections (the menu is ~0.6 m) sit higher.
+      // The panel is centred on its position: taller sections (menu ~0.23 m) sit higher.
+      // Seated, every section's bottom edge clears the tallest crystal tips and play
+      // stays inside a 70 x 66 degree view centred on the bench.
       const sec = this.hud.section;
-      const raise = sec === 'menu' ? 0.37 : sec === 'play' || sec === 'calibrate' ? (xr ? 0.2 : 0.13) : 0.28;
+      const raise = sec === 'menu' || sec === 'hall' ? 0.165 : sec === 'play' || sec === 'calibrate' ? (xr ? 0.11 : 0.13) : 0.145;
       this.v1.set(0, raise, -(d / 2 + 0.1));
       this.benchRoot.localToWorld(this.v1);
       if (!xr) this.frameDesktop(sec === 'play' ? 0 : 1);
@@ -2056,6 +2066,12 @@ export class HandcastSystem extends createSystem({}) {
       },
       xrActive: () => this.world.renderer.xr.isPresenting,
       exitXR: () => this.world.exitXR(),
+      /** Large text, high contrast HUD on or off (the Menu toggle without the round trip). */
+      setContrast: (on: boolean) => {
+        this.progress.contrast = on;
+        saveProgress(this.progress);
+        this.hud.setContrast(on);
+      },
       frameRate: () => this.frameRate.rate,
       /** Simulates the Quest system menu opening (true) or closing (false) in IWER. */
       systemMenu: async (open: boolean) => {
