@@ -41,12 +41,12 @@ const MAX_RATE = 240;
 
 export class StillnessDetector {
   readonly window: number;
-  readonly tolPalm: number;
-  readonly tolTip: number;
-  readonly tolAngle: number;
+  tolPalm: number;
+  tolTip: number;
+  tolAngle: number;
   readonly rise: number;
   readonly fall: number;
-  readonly outliers: number;
+  outliers: number;
   readonly minSamples: number;
 
   private readonly cap: number;
@@ -74,6 +74,14 @@ export class StillnessDetector {
     this.tipBuf = new Float32Array(this.cap * 15);
     this.nrmBuf = new Float32Array(this.cap * 3);
     this.dtBuf = new Float32Array(this.cap);
+  }
+
+  /** Changes the tolerances in place (e.g. Steady mode); the window keeps its samples. */
+  setTolerances(t: Pick<StillnessOptions, 'tolPalm' | 'tolTip' | 'tolAngle' | 'outliers'>): void {
+    if (t.tolPalm !== undefined) this.tolPalm = t.tolPalm;
+    if (t.tolTip !== undefined) this.tolTip = t.tolTip;
+    if (t.tolAngle !== undefined) this.tolAngle = t.tolAngle;
+    if (t.outliers !== undefined) this.outliers = t.outliers;
   }
 
   /** Hold progress 0..1 (1 = held long enough to cast). */

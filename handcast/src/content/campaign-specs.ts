@@ -36,7 +36,7 @@ export const CHAPTER_SPECS: ChapterSpec[] = [
     music: 0,
     boards: [
       {
-        id: 'prologue-1', name: 'First Light', hint: 'Rest your open hand in the pool.',
+        id: 'prologue-1', name: 'First Light', hint: 'Rest your open hand in the pool. Hold still.',
         intent: 'Right palm in the white pool, fingers open: the four long fingers each light a crystal.',
         tags: ['allowAnySpread'], rivals: 'none',
         casts: [{ pose: 'spread', hand: 'right', yaw: [-35, 35], overrides: { spread: 0.6 }, feeds: [{ kind: 'well-palm', color: W }] }],

@@ -57,12 +57,17 @@ import { Hud, HudHandlers } from './hud.js';
 import { LevelSource, levelSource, SLOT } from './level-source.js';
 import { loadProgress, Progress, saveProgress } from './progress.js';
 import { sealMessage, StudioCursor, StudioSession, StudioTool } from './studio.js';
+import { createEnterXRButton, EnterXRButton } from './enter-xr.js';
 
 const FWD = -Math.PI / 2;
 const SLAB_HEIGHT = 0.11; // a hand participates when its palm is this close to the bench
 const BENCH_MARGIN = 0.06;
 const WITHDRAW = 0.07; // after casting, move this far before the same hand can cast again
 const PLUCK_NOTES = [74, 69, 67, 71, 76];
+const CALIB_FALLBACK = 15; // s without a flat hand: put the bench in front of the player
+/** Stillness tolerances: normal, and Steady mode (for tremor: wider, more forgiving). */
+const STILL_NORMAL = { tolPalm: 0.007, tolTip: 0.01, tolAngle: (4 * Math.PI) / 180, outliers: 1 };
+const STILL_STEADY = { tolPalm: 0.014, tolTip: 0.02, tolAngle: (8 * Math.PI) / 180, outliers: 3 };
 
 interface Cast {
   id: number;
@@ -169,6 +174,15 @@ export class HandcastSystem extends createSystem({}) {
   private pendingPlace = false;
   private calibrating = false;
   private calibHold = 0;
+  /** Seconds spent in the current calibration (fallback placement after CALIB_FALLBACK). */
+  private calibTime = 0;
+  private enterButton: EnterXRButton | null = null;
+  /** Next time (game clock) to look for controllers held instead of hands. */
+  private inputCheckAt = 0;
+  private controllerNag = false;
+  /** Status line to restore after a gaze hint, and when. */
+  private gazeRestore: { text: string; at: number } | null = null;
+  private solveReport: Promise<void> | null = null;
   private demoT = 0;
   private demoStep = 0;
   private backdrop = new ThreeColor(0x07090f);
@@ -237,6 +251,7 @@ export class HandcastSystem extends createSystem({}) {
       this.world.visibilityState.subscribe((vs) => {
         const immersive = vs !== VisibilityState.NonImmersive;
         this.world.scene.background = immersive ? null : this.backdrop;
+        this.enterButton?.setImmersive(immersive);
         if (immersive) {
           this.audio.unlock();
           this.enterXR();
@@ -255,6 +270,12 @@ export class HandcastSystem extends createSystem({}) {
     window.addEventListener('hashchange', onHash);
     this.cleanupFuncs.push(() => window.removeEventListener('hashchange', onHash));
     this.layoutDesktop();
+    this.applySteady();
+    this.enterButton = createEnterXRButton(() => {
+      this.audio.unlock();
+      void this.world.launchXR();
+    });
+    this.cleanupFuncs.push(() => this.enterButton?.dispose());
     this.exposeDebug();
   }
 
@@ -264,6 +285,7 @@ export class HandcastSystem extends createSystem({}) {
     return () => {
       // A pinch on a glass hand can also fire the hand ray at the HUD.
       if (this.live.some((l) => l.grab || l.studioPinch || l.progress > 0.25)) return;
+      if (this.calibrating) return;
       this.audio.unlock();
       this.audio.tick('ui');
       fn();
@@ -293,6 +315,7 @@ export class HandcastSystem extends createSystem({}) {
       assist: g(() => {
         this.progress.steady = !this.progress.steady;
         saveProgress(this.progress);
+        this.applySteady();
         this.openMenu();
       }),
       recenter: g(() => {
@@ -308,6 +331,11 @@ export class HandcastSystem extends createSystem({}) {
       hallPick: (i) => g(() => void this.hallPick(i))(),
       like: g(() => void this.likeBoard()),
     };
+  }
+
+  /** Steady mode: slower casting meter and wider stillness tolerances (tremor). */
+  private applySteady(): void {
+    for (const h of this.tracker.hands) h.stillness.setTolerances(this.progress.steady ? STILL_STEADY : STILL_NORMAL);
   }
 
   private openMenu(): void {
@@ -641,7 +669,7 @@ export class HandcastSystem extends createSystem({}) {
     if (this.levelIndex >= 0 && !this.progress.solved.includes(this.level.id)) this.progress.solved.push(this.level.id);
     if (this.levelIndex === SLOT.daily) this.recordDaily();
     saveProgress(this.progress);
-    if (this.levelIndex === SLOT.hall) void this.reportHallSolve();
+    if (this.levelIndex === SLOT.hall) this.solveReport = this.reportHallSolve();
     // Reveal: the maker's glass hands fade in beside yours.
     const level = this.level;
     this.after(1.4, () => {
@@ -652,8 +680,11 @@ export class HandcastSystem extends createSystem({}) {
   private solvedLine(): string {
     const n = this.casts.length;
     const par = this.level.solution?.length ?? n;
-    if (n < par) return 'Solved with fewer hands than the maker!';
-    return n === 1 ? 'Your hand sings. Tap Next when ready.' : `${n} glass hands sing together.`;
+    const levels = this.source.levels();
+    if (this.levelIndex === levels.length - 1) return 'The last chord. Campaign complete! The Daily, the Kiln and the Studio wait in the Menu.';
+    const more = this.hasNext() ? ' Tap Next when ready.' : ' Open the Menu for more boards.';
+    if (n < par) return `Solved with fewer hands than the maker!${more}`;
+    return n === 1 ? `Your hand sings.${more}` : `${n} glass hands sing together.${more}`;
   }
 
   private reveal(): void {
@@ -832,7 +863,7 @@ export class HandcastSystem extends createSystem({}) {
     const e = res.entry;
     this.audio.voice('ting', 0.9, this.benchRoot.getWorldPosition(this.v1));
     this.hud.setStudioStatus(
-      `Published "${e.name}" by ${e.author}. ${res.online ? 'Find it in the Hall under New.' : 'Saved here; the link is in your address bar.'}`,
+      `Published "${e.name}" by ${e.author}. ${res.online ? 'Find it in the Hall under New.' : 'Saved on this device; exit XR to copy its share link from the address bar.'}`,
       `HALL ID ${e.id.slice(0, 16)}`,
     );
     if (res.url) {
@@ -907,7 +938,8 @@ export class HandcastSystem extends createSystem({}) {
       else if (this.hall.online) rows = tab === 'new' ? await this.hall.listNew() : await this.hall.listTop();
       if (tab !== 'featured' && !rows.length) {
         rows = this.hall.listMine();
-        title = rows.length ? 'Made on this device' : 'Nothing here yet - make one in the Studio';
+        const where = this.hall.online ? '' : ' (offline Hall)';
+        title = rows.length ? `Made on this device${where}` : `Nothing here yet - make one in the Studio${where}`;
       }
     } catch {
       title = 'The Hall is out of reach';
@@ -990,7 +1022,13 @@ export class HandcastSystem extends createSystem({}) {
 
   private async likeBoard(): Promise<void> {
     const id = this.hallEntryId ?? this.level.id;
+    // The server only counts likes from players whose solve it has verified.
+    if (this.solveReport) await this.solveReport.catch(() => undefined);
     const r = await this.hall.like(id);
+    if (!r.liked) {
+      this.setStatus('That like did not reach the Hall. Try again in a moment.');
+      return;
+    }
     this.hud.setLike(r.likes !== null ? `Liked ${r.likes}` : 'Liked');
     if (r.liked && !r.already) this.audio.voice('ting', 0.7, this.benchRoot.getWorldPosition(this.v1));
   }
@@ -1055,7 +1093,13 @@ export class HandcastSystem extends createSystem({}) {
       let p = l.progress;
       if (armed && h.stillness.still && this.castsLeft() > 0) p += dt * rise;
       else p -= dt * rise * 2;
-      this.setCasting(l, Math.max(0, Math.min(1, p)));
+      p = Math.max(0, Math.min(1, p));
+      // Teach the hold while it happens (play only; the Studio has its own status).
+      if (this.mode === 'play' && !this.solved) {
+        if (p >= 0.12 && l.progress < 0.12) this.setStatus('Hold still... the glass is pouring.');
+        else if (p <= 0.35 && l.progress > 0.35) this.setStatus('Hold steadier: keep your hand still in the light.');
+      }
+      this.setCasting(l, p);
       if (armed && h.stillness.still && this.castsLeft() <= 0 && h.stillness.progress > 0.9 && !this.solved) {
         this.setStatus('No glass left. Knock a glass hand with your fist to reuse it.');
       }
@@ -1308,12 +1352,23 @@ export class HandcastSystem extends createSystem({}) {
     if (!this.world.renderer.xr.isPresenting) return;
     this.calibrating = true;
     this.calibHold = 0;
+    this.calibTime = 0;
     this.benchRoot.visible = false;
-    this.hud.show('play');
+    this.hud.show('calibrate');
     this.hud.setBoard('SET UP', 'Find your table', 'Rest one hand flat on your table and hold still.');
   }
 
   private updateCalibration(dt: number): void {
+    this.calibTime += dt;
+    if (this.calibTime > CALIB_FALLBACK) {
+      // No table found: play anyway, on a bench in front of the player. Menu > Table tries again.
+      this.placeInFront();
+      this.setStatus('Bench placed in front of you. Menu > Table finds your real table.');
+      return;
+    }
+    if (this.calibTime > 7 && this.calibTime - dt <= 7) {
+      this.setStatus('Rest one hand flat and still on the table. No table? The bench appears in a moment.');
+    }
     for (const h of this.tracker.hands) {
       if (!h.tracked) continue;
       const flat = h.palm.normal[1] < -0.8;
@@ -1349,16 +1404,19 @@ export class HandcastSystem extends createSystem({}) {
     this.calibHold = Math.max(0, this.calibHold - dt);
   }
 
-  private finishPlacement(): void {
+  /** `persist`: a real calibration (save the table anchor); false for a head-relative fallback. */
+  private finishPlacement(persist = true): void {
     this.calibrating = false;
     this.placed = true;
     this.pendingPlace = false;
     this.benchRoot.visible = true;
-    this.progress.calibrated = true;
-    saveProgress(this.progress);
     this.benchRoot.updateWorldMatrix(true, false);
-    this.table.reset();
-    this.table.requestAt(this.benchRoot.getWorldPosition(this.v1), this.benchRoot.getWorldQuaternion(this.q1));
+    if (persist) {
+      this.progress.calibrated = true;
+      saveProgress(this.progress);
+      this.table.reset();
+      this.table.requestAt(this.benchRoot.getWorldPosition(this.v1), this.benchRoot.getWorldQuaternion(this.q1));
+    }
     this.ambience.setBenchCenter(this.benchRoot.getWorldPosition(this.v1));
     this.audio.tick('place');
     const info = this.source.describe(this.level, this.levelIndex);
@@ -1375,7 +1433,19 @@ export class HandcastSystem extends createSystem({}) {
     this.benchRoot.position.copy(this.headPos).addScaledVector(f, 0.42);
     this.benchRoot.position.y = tableY ?? Math.max(0.45, this.headPos.y - 0.45);
     this.benchRoot.rotation.set(0, Math.atan2(-f.x, -f.z), 0);
-    this.finishPlacement();
+    // A floating, head-relative bench is not the player's table: do not anchor it.
+    this.finishPlacement(false);
+  }
+
+  private deskView = 0;
+  /** 2D page camera: 0 looks down at the bench, 1 leans back to frame a tall panel. */
+  private frameDesktop(target: number): void {
+    const k = this.deskView + (target - this.deskView) * 0.12;
+    if (Math.abs(k - this.deskView) < 1e-4 && k === target) return;
+    this.deskView = Math.abs(k - target) < 0.002 ? target : k;
+    const cam = this.world.camera;
+    cam.position.set(0, 1.24 + 0.1 * this.deskView, 0.06 + 0.42 * this.deskView);
+    cam.lookAt(0, 0.8 + 0.3 * this.deskView, -0.38 - 0.12 * this.deskView);
   }
 
   private layoutDesktop(): void {
@@ -1385,6 +1455,7 @@ export class HandcastSystem extends createSystem({}) {
     const cam = this.world.camera;
     cam.position.set(0, 1.24, 0.06);
     cam.lookAt(0, 0.8, -0.38);
+    this.deskView = 0;
     this.ambience.setBenchCenter(this.benchRoot.getWorldPosition(this.v1));
     this.mode = 'demo';
     this.demoT = 0;
@@ -1409,9 +1480,12 @@ export class HandcastSystem extends createSystem({}) {
       this.v1.y -= 0.12;
     } else {
       const d = this.level ? this.level.bench.d : 0.3;
-      const raise = xr ? (this.hud.section === 'play' ? 0.2 : 0.26) : this.hud.section === 'play' ? 0.13 : 0.24;
+      // The panel is centred on its position: tall sections (the menu is ~0.6 m) sit higher.
+      const sec = this.hud.section;
+      const raise = sec === 'menu' ? 0.37 : sec === 'play' || sec === 'calibrate' ? (xr ? 0.2 : 0.13) : 0.28;
       this.v1.set(0, raise, -(d / 2 + 0.1));
       this.benchRoot.localToWorld(this.v1);
+      if (!xr) this.frameDesktop(sec === 'play' ? 0 : 1);
     }
     const parent = hud.parent;
     if (parent) parent.worldToLocal(this.v1);
@@ -1501,6 +1575,11 @@ export class HandcastSystem extends createSystem({}) {
     }
     this.audio.setListener(this.headPos, this.headFwd, this.headUp);
     this.runTimers();
+    if (this.gazeRestore && this.time > this.gazeRestore.at) {
+      if (!this.solved && this.hud.status.startsWith('This crystal wants')) this.setStatus(this.gazeRestore.text);
+      this.gazeRestore = null;
+    }
+    if (xr && this.time > this.inputCheckAt) this.checkControllers();
     this.anchorTick();
     this.updateHands(dt);
     this.updateDemo(dt);
@@ -1544,6 +1623,24 @@ export class HandcastSystem extends createSystem({}) {
     this.layoutHud();
   }
 
+  /** Controllers in hand instead of hands: say so (once until it changes). */
+  private checkControllers(): void {
+    this.inputCheckAt = this.time + 1;
+    const sources = this.world.session?.inputSources;
+    if (!sources) return;
+    let pads = false;
+    let hands = false;
+    for (const src of sources) {
+      if (src.hand) hands = true;
+      else if (src.gamepad) pads = true;
+    }
+    const nag = pads && !hands;
+    if (nag && !this.controllerNag) {
+      this.setStatus('Put your controllers down: HANDCAST is played with your hands. (Turn on hand tracking in Settings if they do not appear.)');
+    }
+    this.controllerNag = nag;
+  }
+
   private updateGaze(dt: number): void {
     if (!this.bench || this.calibrating) return;
     let best = -1;
@@ -1572,7 +1669,12 @@ export class HandcastSystem extends createSystem({}) {
       this.gazeSung.add(best);
       const pos = this.benchPos(this.bench.worldOf('crystal', best, this.v1), this.v1);
       this.audio.bell(this.notes[best], pos, 0.35, 1.6);
-      if (!this.solved) this.setStatus(`This crystal wants ${colourWords(this.level.crystals[best].color)} light.`);
+      // The board's own hint teaches first: colour names only once glass is down.
+      if (!this.solved && this.casts.length && this.mode !== 'studio') {
+        const text = this.hud.status;
+        this.setStatus(`This crystal wants ${colourWords(this.level.crystals[best].color)} light.`);
+        this.gazeRestore = { text: this.gazeRestore?.text ?? text, at: this.time + 4 };
+      }
     }
   }
 

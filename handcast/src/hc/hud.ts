@@ -11,7 +11,7 @@ type El = {
   removeEventListener(type: string, fn: () => void): void;
 };
 
-export type HudSection = 'play' | 'menu' | 'studio' | 'hall';
+export type HudSection = 'play' | 'menu' | 'studio' | 'hall' | 'calibrate';
 
 export const HUD_LEVELS = 49;
 const METER = 8;
@@ -47,6 +47,8 @@ const TOOLS = ['lamp', 'well', 'hush', 'wall', 'erase'] as const;
 
 const SECTIONS: Record<HudSection, string[]> = {
   play: ['play', 'play-actions'],
+  // Setup shows only the board text: no buttons to fumble while finding the table.
+  calibrate: ['play'],
   menu: ['menu', 'menu-actions', 'menu-actions-2'],
   studio: ['studio', 'studio-tools', 'studio-actions'],
   hall: ['hall', 'hall-actions'],
@@ -105,8 +107,9 @@ export class Hud {
 
   show(section: HudSection): void {
     this.section = section;
-    for (const [name, ids] of Object.entries(SECTIONS)) {
-      for (const id of ids) this.set(id, { display: name === section ? 'flex' : 'none' });
+    const on = new Set(SECTIONS[section]);
+    for (const ids of Object.values(SECTIONS)) {
+      for (const id of ids) this.set(id, { display: on.has(id) ? 'flex' : 'none' });
     }
   }
 
