@@ -58,6 +58,7 @@ import { LevelSource, levelSource, SLOT } from './level-source.js';
 import { loadProgress, Progress, saveProgress } from './progress.js';
 import { sealMessage, StudioCursor, StudioSession, StudioTool } from './studio.js';
 import { createEnterXRButton, EnterXRButton } from './enter-xr.js';
+import { FrameRateGovernor } from './frame-rate.js';
 
 const FWD = -Math.PI / 2;
 const SLAB_HEIGHT = 0.11; // a hand participates when its palm is this close to the bench
@@ -139,6 +140,7 @@ export class HandcastSystem extends createSystem({}) {
   private bench: BenchView | null = null;
   private beams: BeamRenderer2D | null = null;
   private table = new TableAnchor();
+  private frameRate = new FrameRateGovernor();
 
   private mode: Mode = 'play';
   private level!: LevelDef;
@@ -1307,6 +1309,7 @@ export class HandcastSystem extends createSystem({}) {
   // ------------------------------------------------------------------ table placement
 
   private enterXR(): void {
+    this.frameRate.begin(this.world.session);
     if (this.mode === 'demo') {
       // Start the board fresh: the attract demo's glass hands are not the player's.
       this.mode = 'play';
@@ -1327,6 +1330,7 @@ export class HandcastSystem extends createSystem({}) {
   }
 
   private exitXR(): void {
+    this.frameRate.end();
     this.placed = false;
     this.calibrating = false;
     this.pendingPlace = false;
@@ -1573,6 +1577,7 @@ export class HandcastSystem extends createSystem({}) {
     this.time = time;
     const xr = this.world.renderer.xr.isPresenting;
     if (xr) {
+      this.frameRate.sample(delta);
       this.readHead();
     } else {
       this.world.camera.getWorldPosition(this.headPos);
@@ -1820,6 +1825,7 @@ export class HandcastSystem extends createSystem({}) {
         this.world.launchXR();
       },
       xrActive: () => this.world.renderer.xr.isPresenting,
+      frameRate: () => this.frameRate.rate,
       /**
        * Emulator only: shape an IWER hand into a pose-library pose at a bench
        * position (or hide it with name = null). Drives the real tracking path.
