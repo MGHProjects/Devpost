@@ -42,6 +42,7 @@ import { traceLevel } from '../core/trace2d.js';
 import { pointSegDistSq } from '../core/vec2.js';
 import { HandOptic, HandPose, LevelDef, TraceResult, V2 } from '../core/types.js';
 import { TableAnchor } from '../input/anchor.js';
+import { TableFinder } from '../input/table-finder.js';
 import { isKnock, pinchGrabs, pluckCrossing, twistAngle, unwrapAngle, GESTURE } from '../input/gestures.js';
 import { HandTracker25, LOSS_GRACE, TrackedHand } from '../input/hand-tracker.js';
 import { Ambience } from '../render/bench/ambience.js';
@@ -72,6 +73,8 @@ const CALIB_FALLBACK = 15; // s without a flat hand: put the bench in front of t
 /** Seconds for the bench to pour out of the palm that found the table (re-pour from an anchor: shorter). */
 const POUR_FIRST = 2.6;
 const POUR_AGAIN = 1.0;
+/** Set-up: with a table detected by the headset (planes or hit-test), place on it after this many seconds without a hand. */
+const CALIB_DETECTED = 9;
 /** Stillness tolerances: normal, and Steady mode (for tremor: wider, more forgiving). */
 const STILL_NORMAL = { tolPalm: 0.007, tolTip: 0.01, tolAngle: (4 * Math.PI) / 180, outliers: 1 };
 const STILL_STEADY = { tolPalm: 0.014, tolTip: 0.02, tolAngle: (8 * Math.PI) / 180, outliers: 3 };
@@ -196,6 +199,10 @@ export class HandcastSystem extends createSystem({}) {
   /** Calibration: a ghost glass hand pressing flat on the table, in a loop (no sentence needed). */
   private calibGhost: CastView | null = null;
   private calibAnchor = new Group();
+  /** The real table as the headset sees it during set-up (planes / hit-test), if it does. */
+  private tableFinder = new TableFinder();
+  /** How the next persisted placement found the table (perf report). */
+  private placedBy = 'hand on table';
   /** Bench-space point the next placement pours from (null: the bench centre). */
   private pourFrom: V2 | null = null;
   /** After a placement, hands already on the bench must lift off before they can cast. */
@@ -1476,6 +1483,7 @@ export class HandcastSystem extends createSystem({}) {
     this.placed = false;
     this.calibrating = false;
     this.hideCalibGhost();
+    this.tableFinder.end();
     this.pendingPlace = false;
     this.table.reset();
     for (const l of this.live) {
@@ -1522,6 +1530,7 @@ export class HandcastSystem extends createSystem({}) {
     this.benchRoot.visible = false;
     this.hud.show('calibrate');
     this.hud.setBoard('SET UP', 'Find your table', 'Rest a hand flat on the table, like the glass one. Hold still.');
+    this.tableFinder.begin(this.world.session);
     this.showCalibGhost();
   }
 
@@ -1546,15 +1555,23 @@ export class HandcastSystem extends createSystem({}) {
       if (this.templates) this.showCalibGhost();
       return;
     }
-    this.readHead();
     const f = this.v1.copy(this.headFwd).setY(0);
     if (f.lengthSq() < 1e-4) f.set(0, 0, -1);
     f.normalize();
     const cycle = (this.calibTime % 2) / 2;
     const press = cycle < 0.35 ? cycle / 0.35 : cycle < 0.75 ? 1 : 1 - (cycle - 0.75) / 0.25;
     const ease = press * press * (3 - 2 * press);
-    this.calibAnchor.position.copy(this.headPos).addScaledVector(f, 0.42);
-    this.calibAnchor.position.y = Math.max(0.45, this.headPos.y - 0.45) + 0.03 * (1 - ease);
+    // On the real table when the headset sees it; otherwise a guess ahead of the head.
+    const t = this.tableFinder.best;
+    if (t) {
+      this.calibAnchor.position.set(t.x, t.y, t.z);
+      f.set(t.x - this.headPos.x, 0, t.z - this.headPos.z);
+      if (f.lengthSq() > 1e-4) f.normalize();
+    } else {
+      this.calibAnchor.position.copy(this.headPos).addScaledVector(f, 0.42);
+      this.calibAnchor.position.y = Math.max(0.45, this.headPos.y - 0.45);
+    }
+    this.calibAnchor.position.y += 0.03 * (1 - ease);
     this.calibAnchor.rotation.set(0, Math.atan2(-f.x, -f.z), 0);
     // Fades while a real hand is resting (it is doing the job now).
     const resting = Math.min(1, this.calibHold / 0.3);
@@ -1564,7 +1581,16 @@ export class HandcastSystem extends createSystem({}) {
 
   private updateCalibration(dt: number): void {
     this.calibTime += dt;
+    this.readHead();
+    const xr = this.world.renderer.xr;
+    this.tableFinder.update(xr.getFrame(), xr.getReferenceSpace(), this.player.matrixWorld.elements, this.headPos, this.headFwd);
     this.updateCalibGhost(dt);
+    const seen = this.tableFinder.best;
+    if (seen && this.calibTime > CALIB_DETECTED && this.calibHold === 0) {
+      // The headset already sees the table: pour the bench onto it.
+      this.placeOnSurface(seen.x, seen.y, seen.z, seen.source);
+      return;
+    }
     if (this.calibTime > CALIB_FALLBACK) {
       // No table found: play anyway, on a bench in front of the player. Menu > Table tries again.
       this.placeInFront();
@@ -1604,8 +1630,11 @@ export class HandcastSystem extends createSystem({}) {
       let y = 0;
       for (const t of [9, 14, 19, 24]) y += p[t * 3 + 1] - h.radii[t];
       y /= 4;
-      this.readHead();
       const c = h.palm.center;
+      // A detected plane under the hand gives the exact height (joint radii are estimates).
+      const plane = this.tableFinder.planeHeightAt(xr.getFrame(), xr.getReferenceSpace(), this.player.matrixWorld.elements, c[0], c[2], y, 0.04);
+      if (plane !== null) y = plane;
+      this.placedBy = plane !== null ? 'hand on table, height from plane' : 'hand on table';
       const dx = c[0] - this.headPos.x;
       const dz = c[2] - this.headPos.z;
       const yaw = Math.atan2(-dx, -dz);
@@ -1627,8 +1656,10 @@ export class HandcastSystem extends createSystem({}) {
 
   /** `persist`: a real calibration (save the table anchor); false for a head-relative fallback. */
   private finishPlacement(persist = true, pour = true): void {
-    this.perfEvent('placed', persist ? 'hand on table' : 'in front, no table');
+    this.perfEvent('placed', persist ? this.placedBy : 'in front, no table');
+    this.placedBy = 'hand on table';
     this.calibrating = false;
+    this.tableFinder.end();
     this.hideCalibGhost();
     this.lockAfterPlace = true;
     if (pour) this.pourBench(this.pourFrom ?? [0, 0], POUR_FIRST);
@@ -1652,6 +1683,17 @@ export class HandcastSystem extends createSystem({}) {
   }
 
   /** Head-relative fallback placement (no calibration). */
+  /** Bench on a surface the headset detected, facing the player, poured from its centre. */
+  private placeOnSurface(x: number, y: number, z: number, source: string): void {
+    const dx = x - this.headPos.x;
+    const dz = z - this.headPos.z;
+    const yaw = Math.atan2(-dx, -dz);
+    this.benchRoot.position.set(x, y - 0.002, z);
+    this.benchRoot.rotation.set(0, yaw, 0);
+    this.placedBy = `table seen by the headset (${source})`;
+    this.finishPlacement();
+  }
+
   placeInFront(tableY?: number, pour = true): void {
     this.readHead();
     const f = this.v1.copy(this.headFwd).setY(0);
@@ -1950,6 +1992,10 @@ export class HandcastSystem extends createSystem({}) {
         cursor: this.cursor.group.visible ? this.cursor.group.children.map((c) => [c.visible, ...c.getWorldPosition(new Vector3()).toArray().map((v) => +v.toFixed(3))]) : null,
         calibrating: this.calibrating,
         calibGhost: !!this.calibGhost,
+        tableSeen: this.tableFinder.best,
+        tableDiag: { ...this.tableFinder.seen },
+        ghostAt: this.calibGhost ? this.calibAnchor.position.toArray() : null,
+        features: this.world.session?.enabledFeatures ?? null,
         pouring: !!this.bench?.pouring,
         placed: this.placed,
         crystals: this.display?.crystals.map((c) => c.state),
