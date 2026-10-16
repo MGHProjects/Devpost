@@ -222,6 +222,9 @@
     letter-spacing: 1px;
     color: #a9c6e0;
   }
+  .tour-label {
+    color: #ffd76a;
+  }
   .movement-label-hc {
     width: 132px;
     font-size: 16px;
@@ -367,6 +370,15 @@
 
   <div id="menu" class="menu-body" style="display: none">
     <div class="menu-grid">
+      <div class="grid-row">
+        <div id="tour-label" class="movement-label tour-label">TOUR</div>
+        <div id="tour-0" class="cell-btn"><div id="tour-0-t" class="cell-label">1</div></div>
+        <div id="tour-1" class="cell-btn"><div id="tour-1-t" class="cell-label">2</div></div>
+        <div id="tour-2" class="cell-btn"><div id="tour-2-t" class="cell-label">3</div></div>
+        <div id="tour-3" class="cell-btn"><div id="tour-3-t" class="cell-label">4</div></div>
+        <div id="tour-4" class="cell-btn"><div id="tour-4-t" class="cell-label">5</div></div>
+        <div id="tour-5" class="cell-btn"><div id="tour-5-t" class="cell-label">6</div></div>
+      </div>
       <div class="grid-row">
         <div id="ch-0-label" class="movement-label">PROLOGUE</div>
         <div id="lvl-0" class="cell-btn"><div id="lvl-0-t" class="cell-label">1</div></div>

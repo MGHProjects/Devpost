@@ -18,6 +18,7 @@ type ClassList = { contains(name: string): boolean; add(name: string): void; rem
 export type HudSection = 'play' | 'menu' | 'studio' | 'hall' | 'calibrate';
 
 export const HUD_LEVELS = 49;
+export const TOUR_CELLS = 6;
 const METER = 8;
 const TOKENS = 4;
 const HALL_ROWS = 6;
@@ -38,6 +39,8 @@ export interface HudHandlers {
   assist(): void;
   /** Large text, high contrast (accessibility). */
   contrast(): void;
+  /** The judge's tour: a short path through the best boards, from cold boot. */
+  tour(i: number): void;
   recenter(): void;
   tool(name: 'lamp' | 'well' | 'hush' | 'wall' | 'erase'): void;
   studioUndo(): void;
@@ -109,6 +112,8 @@ export class Hud {
   private hcTargets: { list: ClassList; cls: string }[] = [];
   private menuStates: ('solved' | 'open')[] = [];
   private menuCurrent = -1;
+  private tourStates: ('solved' | 'open')[] = [];
+  private tourCurrent = -1;
   private tool: string | null = null;
 
   constructor(world: World, h: HudHandlers) {
@@ -147,6 +152,7 @@ export class Hud {
     bind('hall-top', () => h.hallTab('top'));
     bind('hall-back', h.back);
     for (let i = 0; i < HUD_LEVELS; i++) bind(`lvl-${i}`, () => h.pick(i));
+    for (let i = 0; i < TOUR_CELLS; i++) bind(`tour-${i}`, () => h.tour(i));
     for (let i = 0; i < HALL_ROWS; i++) bind(`hall-${i}`, () => h.hallPick(i));
     for (let i = 0; i < METER; i++) {
       this.chips.push({ box: this.el(`meter-${i}`), letter: this.el(`meter-${i}-t`), check: this.el(`meter-${i}-k`), mask: -2, lit: false, hc: false });
@@ -256,9 +262,14 @@ export class Hud {
     states: ('solved' | 'open')[],
     current: number,
     labels: { daily: string; sound: string; assist: string; contrast?: string },
+    tour?: { states: ('solved' | 'open')[]; current: number },
   ): void {
     this.menuStates = states;
     this.menuCurrent = current;
+    if (tour) {
+      this.tourStates = tour.states;
+      this.tourCurrent = tour.current;
+    }
     this.paintMenu();
     for (let i = states.length; i < HUD_LEVELS; i++) this.set(`lvl-${i}`, { display: 'none' });
     this.set('btn-daily-label', { text: labels.daily });
@@ -275,6 +286,12 @@ export class Hud {
       const solved = states[i] === 'solved';
       this.set(`lvl-${i}`, { backgroundColor: cur ? ACCENT : solved ? CELL_SOLVED : CELL_OPEN[hc] });
       this.set(`lvl-${i}-t`, { color: cur || solved ? INK : hc ? '#ffffff' : TEXT });
+    }
+    for (let i = 0; i < this.tourStates.length && i < TOUR_CELLS; i++) {
+      const cur = i === this.tourCurrent;
+      const solved = this.tourStates[i] === 'solved';
+      this.set(`tour-${i}`, { backgroundColor: cur ? ACCENT : solved ? CELL_SOLVED : CELL_OPEN[hc] });
+      this.set(`tour-${i}-t`, { color: cur || solved ? INK : hc ? '#ffffff' : TEXT });
     }
   }
 

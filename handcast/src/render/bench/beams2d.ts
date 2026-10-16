@@ -143,6 +143,7 @@ export class BeamRenderer2D {
   private haloMat: ShaderMaterial;
   private sparks: BillboardCloud;
   private boost = 0;
+  private baseIntensity: [number, number] = [1.3, 0.42];
 
   constructor(private height = LIGHT_SHEET_Y) {
     this.group.name = 'beams2d';
@@ -340,6 +341,12 @@ export class BeamRenderer2D {
     this.haloMat.uniforms.uTime.value = time;
     this.coreMat.uniforms.uBoost.value = this.boost * 1.2;
     this.haloMat.uniforms.uBoost.value = this.boost * 2;
+  }
+
+  /** Scales the whole beam set (1 = normal; hint beams draw faint). */
+  setIntensity(k: number): void {
+    this.coreMat.uniforms.uIntensity.value = this.baseIntensity[0] * k;
+    this.haloMat.uniforms.uIntensity.value = this.baseIntensity[1] * k;
   }
 
   dispose(): void {

@@ -73,6 +73,8 @@ const CALIB_FALLBACK = 15; // s without a flat hand: put the bench in front of t
 /** Seconds for the bench to pour out of the palm that found the table (re-pour from an anchor: shorter). */
 const POUR_FIRST = 2.6;
 const POUR_AGAIN = 1.0;
+/** The judge's tour: six boards that show the range, playable cold, in order. */
+const TOUR = ['fingers-3', 'mirror-1', 'relay-1', 'colour-5', 'relay-8', 'finale-4'];
 /** Set-up: with a table detected by the headset (planes or hit-test), place on it after this many seconds without a hand. */
 const CALIB_DETECTED = 9;
 /** Stillness tolerances: normal, and Steady mode (for tremor: wider, more forgiving). */
@@ -190,6 +192,17 @@ export class HandcastSystem extends createSystem({}) {
   private gazed = -1;
   private gazeTime = 0;
   private hintUntil = 0;
+  /** Progressive Hint: 0 none yet, 1 the light path shown, 2 the ghost hand shown. */
+  private hintStage = 0;
+  /** Hint stage 1: where the solution's light goes, drawn faint over the bench. */
+  private hintBeams: BeamRenderer2D | null = null;
+  private hintBeamsUntil = 0;
+  /** Position in TOUR while touring (-1: not touring). */
+  private tourAt = -1;
+  /** Prologue: a ghost fist knocking a glass hand down (or only showing how). */
+  private knockDemo: { ghost: CastView; target: Cast; t: number; real: boolean; dx: number } | null = null;
+  /** Prologue board 1: last time anything happened (a hand on the bench, a cast). */
+  private idleSince = 0;
   private boost = 0;
   private time = 0;
   private placed = false;
@@ -376,6 +389,7 @@ export class HandcastSystem extends createSystem({}) {
         this.applySteady();
         this.openMenu();
       }),
+      tour: (i) => g(() => this.startTour(i))(),
       contrast: g(() => {
         this.progress.contrast = !this.progress.contrast;
         saveProgress(this.progress);
@@ -413,6 +427,7 @@ export class HandcastSystem extends createSystem({}) {
         assist: this.progress.steady ? 'Steady on' : 'Steady',
         contrast: this.progress.contrast ? 'Large on' : 'Large text',
       },
+      { states: TOUR.map((id) => (this.progress.solved.includes(id) ? 'solved' : 'open')), current: this.tourAt },
     );
     this.hud.show('menu');
   }
@@ -505,8 +520,8 @@ export class HandcastSystem extends createSystem({}) {
     this.beams = new BeamRenderer2D();
     bench.root.add(this.beams.group);
 
-    const info = this.source.describe(level, this.levelIndex);
-    this.hud.setBoard(info.eyebrow, level.name, level.hint ?? this.defaultHint());
+    if (this.tourAt >= 0 && (this.levelIndex < 0 || level.id !== TOUR[this.tourAt])) this.tourAt = -1;
+    this.hud.setBoard(this.eyebrow(), level.name, level.hint ?? this.defaultHint());
     this.hud.setSolved(false, this.hasNext());
     this.hud.setLike(this.hall.hasLiked(level.id) ? 'Liked' : 'Like');
     this.hud.setBudget(level.budget, level.budget);
@@ -517,6 +532,7 @@ export class HandcastSystem extends createSystem({}) {
     this.audio.setAmbient(this.source.tonic(level, this.levelIndex));
     this.demoT = 0;
     this.demoStep = 0;
+    this.idleSince = this.time;
   }
 
   private defaultHint(): string {
@@ -525,6 +541,9 @@ export class HandcastSystem extends createSystem({}) {
   }
 
   private clearBoard(): void {
+    this.clearHintBeams();
+    this.endKnockDemo();
+    this.hintStage = 0;
     for (const c of [...this.casts, ...this.ghosts]) c.view.dispose();
     this.casts = [];
     this.ghosts = [];
@@ -551,12 +570,31 @@ export class HandcastSystem extends createSystem({}) {
   }
 
   private hasNext(): boolean {
+    if (this.tourAt >= 0) return this.tourAt < TOUR.length - 1;
     return this.levelIndex >= 0 && this.levelIndex < this.source.levels().length - 1;
   }
 
   private nextBoard(): void {
+    if (this.tourAt >= 0) {
+      if (this.tourAt < TOUR.length - 1) this.startTour(this.tourAt + 1);
+      return;
+    }
     if (this.hasNext()) this.loadIndex(this.levelIndex + 1);
     else this.loadSpecial(this.source.daily(), -1);
+  }
+
+  private startTour(i: number): void {
+    const idx = this.source.levels().findIndex((l) => l.id === TOUR[i]);
+    if (idx < 0) return;
+    this.toPlay();
+    this.tourAt = i;
+    this.loadIndex(idx);
+  }
+
+  /** The board's eyebrow line (the tour has its own count). */
+  private eyebrow(): string {
+    if (this.tourAt >= 0) return `TOUR - ${this.tourAt + 1} / ${TOUR.length}`;
+    return this.source.describe(this.level, this.levelIndex).eyebrow;
   }
 
   // ------------------------------------------------------------------ casts
@@ -755,6 +793,11 @@ export class HandcastSystem extends createSystem({}) {
     const n = this.casts.length;
     const par = this.level.solution?.length ?? n;
     const levels = this.source.levels();
+    if (this.tourAt >= 0) {
+      return this.tourAt === TOUR.length - 1
+        ? 'Tour complete! Every chapter, the Daily, the Kiln and the Studio wait in the Menu.'
+        : 'Your hand sings. Tap Next for the next tour board.';
+    }
     if (this.levelIndex === levels.length - 1) return 'The last chord. Campaign complete! The Daily, the Kiln and the Studio wait in the Menu.';
     const more = this.hasNext() ? ' Tap Next when ready.' : ' Open the Menu for more boards.';
     if (n < par) return `Solved with fewer hands than the maker!${more}`;
@@ -765,6 +808,27 @@ export class HandcastSystem extends createSystem({}) {
     if (!this.solved || !this.level.solution) return;
     this.clearHintGhosts();
     for (const cd of this.level.solution) this.addGhost(castToPose(cd));
+  }
+
+  /** Draws the solution's light path faintly; false when there is nothing to draw. */
+  private showHintBeams(): boolean {
+    const sol = this.level.solution;
+    if (!sol?.length || !this.bench) return false;
+    const optics = sol.map((cd, i) => computeOptic(castToPose(cd), { id: `hint-${i}`, live: false }));
+    const segs = traceLevel(this.level, optics).segments;
+    if (!segs.length) return false;
+    if (!this.hintBeams) {
+      this.hintBeams = new BeamRenderer2D();
+      this.bench.root.add(this.hintBeams.group);
+    }
+    this.hintBeams.setSegments(segs);
+    this.hintBeamsUntil = this.time + 10;
+    return true;
+  }
+
+  private clearHintBeams(): void {
+    this.hintBeams?.dispose();
+    this.hintBeams = null;
   }
 
   private clearHintGhosts(): void {
@@ -798,6 +862,14 @@ export class HandcastSystem extends createSystem({}) {
   private showHint(): void {
     this.perfEvent('hint');
     if (this.solved || !this.level.solution) return;
+    // First press: only the light. The player still has to find the hand
+    // shape that sends it there (the puzzle stays theirs). Second press: the hand.
+    if (this.hintStage === 0 && this.showHintBeams()) {
+      this.hintStage = 1;
+      this.setStatus('Hint: follow the faint light. Shape a hand that sends it there. Tap Hint again to see the hand.');
+      return;
+    }
+    this.hintStage = 2;
     const placed = this.casts.length;
     const cd = this.level.solution[Math.min(placed, this.level.solution.length - 1)];
     this.clearHintGhosts();
@@ -1252,7 +1324,83 @@ export class HandcastSystem extends createSystem({}) {
       return;
     }
     if (this.casts.length === 1 && !this.solved) this.setStatus('Slide your hand out. The glass stays.');
+    this.idleSince = this.time;
+    if (this.inPrologue() && cast.kind === 'glass') {
+      // No glass left and not solved is a dead end a newcomer cannot read yet:
+      // a ghost fist knocks the hand down and the glass comes back (boards 1-2),
+      // or shows the knock for the player to do (boards 3+).
+      const level = this.level;
+      this.after(1.6, () => {
+        if (this.level !== level || this.solved || !this.casts.includes(cast) || this.castsLeft() > 0 || this.knockDemo) return;
+        this.startKnockDemo(cast, /^prologue-[12]$/.test(level.id));
+      });
+    }
   }
+
+  /**
+   * Prologue board 1 shows its verb before any words: the ghost glass hand
+   * rests in the pool after the bench appears, and again after 12 s with
+   * nothing happening.
+   */
+  private updatePreplay(): void {
+    if (!this.placed || this.paused || !this.bench || this.bench.pouring || this.solved || this.casts.length) return;
+    if (!this.inPrologue() || this.level.id !== 'prologue-1' || !this.level.solution?.length) return;
+    for (const l of this.live) if (l.optic) this.idleSince = this.time;
+    const first = this.hintStage === 0 && !this.ghosts.length && this.time - this.idleSince > 1.2;
+    if (!first && this.time - this.idleSince < 12) return;
+    this.idleSince = this.time;
+    this.clearHintGhosts();
+    const ghost = this.addCast(castToPose(this.level.solution[0]), 'ghost');
+    if (ghost) {
+      this.hintUntil = this.time + 4;
+      (ghost as Cast & { hint?: boolean }).hint = true;
+      this.hintStage = Math.max(this.hintStage, 1);
+    }
+  }
+
+  private inPrologue(): boolean {
+    return this.mode === 'play' && this.levelIndex >= 0 && this.level.id.startsWith('prologue-');
+  }
+
+  /** A ghost fist slides in from the side of `target`; `real` knocks it over (refund). */
+  private startKnockDemo(target: Cast, real: boolean): void {
+    if (!this.templates || !this.bench) return;
+    const f = footOf(target.pose);
+    const pose = canonicalPose('fist', target.pose.hand, [f[0], f[1]], -Math.PI / 2);
+    const ghost = new CastView(this.templates, pose, 'ghost', { subdivide: 0 });
+    this.bench.root.add(ghost.root);
+    const dx = target.pose.hand === 'left' ? -1 : 1;
+    this.knockDemo = { ghost, target, t: 0, real, dx };
+    this.setStatus(real ? 'A fist knocks glass down, and the glass comes back to you.' : 'No glass left: knock a glass hand with your fist, like this.');
+  }
+
+  private updateKnockDemo(dt: number): void {
+    const k = this.knockDemo;
+    if (!k) return;
+    k.t += dt;
+    const base = k.ghost.root.userData.baseX ?? (k.ghost.root.userData.baseX = k.ghost.root.position.x);
+    // Approach from 9 cm out over 0.6 s; a real knock hits at 0.6 s, a gesture
+    // stops 2 cm short and repeats three times.
+    const cycle = k.real ? Math.min(1, k.t / 0.6) : (k.t % 1.2) / 0.6;
+    const u = Math.min(1, cycle);
+    const reach = k.real ? 0.0 : 0.02;
+    k.ghost.root.position.x = base + k.dx * (0.09 - (0.09 - reach) * u * u);
+    k.ghost.setOpacity(0.55 * Math.min(1, k.t / 0.2));
+    k.ghost.update(dt, this.time);
+    const done = k.real ? k.t >= 0.6 : k.t >= 3.6 || !this.casts.includes(k.target);
+    if (!done) return;
+    if (k.real && this.casts.includes(k.target)) {
+      this.shatterCast(k.target);
+      this.setStatus('The glass came back. Try another hand shape.');
+    }
+    this.endKnockDemo();
+  }
+
+  private endKnockDemo(): void {
+    this.knockDemo?.ghost.dispose();
+    this.knockDemo = null;
+  }
+
 
   private updateGrab(l: Live): void {
     const h = l.hand;
@@ -1677,8 +1825,7 @@ export class HandcastSystem extends createSystem({}) {
     }
     this.ambience.setBenchCenter(this.benchRoot.getWorldPosition(this.v1));
     this.audio.tick('place');
-    const info = this.source.describe(this.level, this.levelIndex);
-    this.hud.setBoard(info.eyebrow, this.level.name, this.level.hint ?? this.defaultHint());
+    this.hud.setBoard(this.eyebrow(), this.level.name, this.level.hint ?? this.defaultHint());
     this.hud.show(this.mode === 'studio' ? 'studio' : 'play');
   }
 
@@ -1897,6 +2044,17 @@ export class HandcastSystem extends createSystem({}) {
     this.boost = Math.max(0, this.boost - dt * 0.6);
     this.beams?.setBoost(this.boost);
     this.beams?.update(dt, time);
+    this.updateKnockDemo(dt);
+    this.updatePreplay();
+    if (this.hintBeams) {
+      const left = this.hintBeamsUntil - time;
+      if (left <= 0 || this.solved) this.clearHintBeams();
+      else {
+        // Faint and breathing, fading out over the last 2 s.
+        this.hintBeams.setIntensity((0.22 + 0.1 * Math.sin(time * 3)) * Math.min(1, left / 2));
+        this.hintBeams.update(dt, time);
+      }
+    }
     this.bench?.update(dt, time);
     this.ambience.setDim(xr ? 0.35 : 0);
     this.ambience.update(dt, time);
@@ -1995,6 +2153,10 @@ export class HandcastSystem extends createSystem({}) {
         tableSeen: this.tableFinder.best,
         tableDiag: { ...this.tableFinder.seen },
         ghostAt: this.calibGhost ? this.calibAnchor.position.toArray() : null,
+        ghosts: this.ghosts.length,
+        hintStage: this.hintStage,
+        hintBeams: !!this.hintBeams,
+        knockDemo: this.knockDemo ? (this.knockDemo.real ? 'knock' : 'gesture') : null,
         features: this.world.session?.enabledFeatures ?? null,
         pouring: !!this.bench?.pouring,
         placed: this.placed,
@@ -2112,6 +2274,20 @@ export class HandcastSystem extends createSystem({}) {
       },
       xrActive: () => this.world.renderer.xr.isPresenting,
       exitXR: () => this.world.exitXR(),
+      /** Starts the judge's tour at board i (0-5); next() advances like the Next button. */
+      tour: (i = 0) => {
+        this.startTour(i);
+        return { tour: this.tourAt, level: this.level.id, eyebrow: this.eyebrow() };
+      },
+      next: () => {
+        this.nextBoard();
+        return { tour: this.tourAt, level: this.level.id, eyebrow: this.eyebrow(), hasNext: this.hasNext() };
+      },
+      /** Presses Hint (progressive: the light path first, then the ghost hand). */
+      hint: () => {
+        this.showHint();
+        return { stage: this.hintStage, beams: !!this.hintBeams, ghosts: this.ghosts.length, status: this.hud.status };
+      },
       /** Large text, high contrast HUD on or off (the Menu toggle without the round trip). */
       setContrast: (on: boolean) => {
         this.progress.contrast = on;

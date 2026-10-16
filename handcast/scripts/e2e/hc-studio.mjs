@@ -88,7 +88,7 @@ export default async function run({ page, frame }) {
   st = await hc(() => window.handcast.state());
   check('hall: board opens in play', st.mode === 'play' && st.index === -3 && st.section === 'play', `mode=${st.mode} index=${st.index} section=${st.section}`);
   await hc(() => window.handcast.iwerSolution(0));
-  const solved = await waitFor(() => window.handcast.state().solved, 9000);
+  const solved = await waitFor(() => window.handcast.state().solved, 15000); // headless: game time runs ~1/3 of wall time
   await wait(400);
   st = await hc(() => window.handcast.state());
   check('hall: solving reports your rank', solved && /First to solve|Solver #/.test(st.status), st.status);

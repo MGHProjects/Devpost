@@ -130,6 +130,49 @@ export default async function run({ page, frame }) {
   check('blade hand casts a glass mirror that solves Mirror Palm 1', blade && st.casts === 1, `mode=${st.live[1].mode} crystals=${st.crystals} casts=${st.casts}`);
   await hc(() => window.handcast.iwerHand('right', null));
 
+  // 6b. Wordless prologue: board 1 shows its verb with a ghost hand; Hint is
+  // progressive (the light path, then the hand); a dead-end cast is knocked
+  // over by a ghost fist and the glass comes back.
+  await hc(() => window.handcast.load(0));
+  const pre = await waitFor(() => window.handcast.state().ghosts > 0, 8000);
+  check('prologue board 1 shows its gesture with a ghost hand', pre);
+  await hc(() => window.handcast.load(2));
+  await wait(300);
+  const h1 = await hc(() => window.handcast.hint());
+  const h2 = await hc(() => window.handcast.hint());
+  check('Hint shows the light path first, the hand second', h1.stage === 1 && h1.beams && h1.ghosts === 0 && h2.stage === 2 && h2.ghosts > 0, `${JSON.stringify(h1)} ${JSON.stringify(h2)}`);
+  await hc(() => window.handcast.load(0));
+  await wait(300);
+  await hc(() => window.handcast.iwerSolution(0, 0, 0, 180));
+  const wrong = await waitFor(() => window.handcast.state().casts === 1, 15000);
+  await hc(() => window.handcast.iwerHand('right', null));
+  let sawKnock = false;
+  const refunded = await waitFor(() => {
+    const s = window.handcast.state();
+    return s.knockDemo ? 'knock' : s.casts === 0 ? 'back' : '';
+  }, 12000).then(async () => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < 12000) {
+      const s = await hc(() => window.handcast.state());
+      if (s.knockDemo) sawKnock = true;
+      if (s.casts === 0 && sawKnock) return true;
+      await wait(150);
+    }
+    return false;
+  });
+  st = await hc(() => window.handcast.state());
+  check('a dead-end prologue cast is knocked over by a ghost fist and refunded', wrong && refunded, `cast=${wrong} knock=${sawKnock} casts=${st.casts} status=${st.status}`);
+
+  // 6c. The judge's tour: one tap from the Menu, its own count, Next follows it.
+  const t0 = await hc(() => window.handcast.tour(0));
+  const t1 = await hc(() => window.handcast.next());
+  await hc(() => window.handcast.tour(5));
+  const tEnd = await hc(() => window.handcast.next());
+  check('the tour starts from the Menu and Next follows it', t0.level === 'fingers-3' && t0.eyebrow === 'TOUR - 1 / 6' && t1.level === 'mirror-1' && t1.eyebrow === 'TOUR - 2 / 6' && tEnd.level === 'finale-4' && !tEnd.hasNext, `${JSON.stringify(t0)} ${JSON.stringify(t1)} ${JSON.stringify(tEnd)}`);
+  await hc(() => window.handcast.load(0));
+  const left = await hc(() => window.handcast.state());
+  check('picking a board leaves the tour', left.level === 'prologue-1', left.level);
+
   // 7. Table set-up: a ghost hand shows the gesture, the resting hand glows like a
   // cast, the bench pours out from under the palm, and that hand cannot cast until
   // it lifts off.
