@@ -19,7 +19,15 @@ through relative imports, so **always deploy from a full checkout of the repo**.
   Heron"). Players never type text that gets published.
 - Hands are retargeted to canonical bone lengths before they are stored, so no
   hand-size biometric is kept. Device ids and IPs are stored only as salted
-  SHA-256 hashes.
+  SHA-256 hashes, and IPs are first reduced to their network (IPv4 address or
+  /24, IPv6 /64 or /48). The Worker refuses every write until `HASH_SALT` is
+  set, because unsalted IP hashes can be reversed.
+- Device ids are chosen by the client, so nothing that counts people trusts
+  them alone. A like needs a verified solve of that level from the same
+  device, and only 3 likes per level count from one network. A level is
+  hidden only when reports come from at least 3 distinct networks, and on a
+  popular level from at least 10% of its solvers. Featured levels are never
+  hidden automatically.
 
 ## Deploy (one time, about 5 minutes)
 
@@ -37,7 +45,7 @@ Paste the printed `database_id` into `wrangler.toml` (replace the
 
 ```bash
 wrangler d1 execute handcast-hall --remote --file=./schema.sql
-wrangler secret put HASH_SALT        # optional but recommended: any long random string
+wrangler secret put HASH_SALT        # required for writes: any long random string
 wrangler deploy                      # prints https://handcast-hall.<your-subdomain>.workers.dev
 curl https://handcast-hall.<your-subdomain>.workers.dev/levels?sort=new   # -> {"entries":[],"cursor":null}
 ```
@@ -103,8 +111,8 @@ the client generates the id and keeps it in localStorage. Errors come back as
 | `POST /levels` | `{ code }` (a level share code that includes the solution casts) → `201 { entry }`, or `200 { entry, existing: true }` for a board that is already published |
 | `POST /levels/:id/solutions` | `{ casts: castCode[] }` → `{ rank, distinctHands, yourShare, solves, fingerprint }` |
 | `GET /levels/:id/hands?limit=30` | → `{ hands: castCode[] }` (one per hand shape first, then the newest) |
-| `POST /levels/:id/like` | → `{ liked, changed, likes }` (one per device) |
-| `POST /levels/:id/report` | `{ reason: offensive\|broken\|spam\|other }` → `{ reported }` (hidden after 3 reports) |
+| `POST /levels/:id/like` | → `{ liked, changed, likes }` (one per device; 403 `solve_first` before a verified solve; at most 3 per network) |
+| `POST /levels/:id/report` | `{ reason: offensive\|broken\|spam\|other }` → `{ reported }` (hidden after reports from 3+ distinct networks; never a featured level) |
 | `GET /daily/:YYYY-MM-DD` | → `{ date, published, solutions, solvers, likes, mostSolved, pick }` |
 
 `HallEntry` is `{ id, code, name, author, likes, solves, featured, createdAt }`.
@@ -122,9 +130,12 @@ at `solves: 1` and its maker's hands are the first ones in the Hall.
 Limits:
 
 - Request bodies: 16 KB. Level codes: 6000 characters.
-- Writes per hour, per device / per IP: publish 10 / 30, solutions 120 / 400,
-  likes 200 / 600, reports 30 / 100.
-- Requests per minute per IP: about 240, counted per isolate.
+- Writes per hour, per device / per network: publish 10 / 30, solutions
+  120 / 400, likes 200 / 600, reports 30 / 100. A network is an IPv4 address
+  or an IPv6 /64. A cron trigger prunes old rate windows every 30 minutes.
+- Requests per minute per network: about 240, counted per isolate.
+- Bodies are read as a stream and refused past 16 KB, even when the request
+  has no Content-Length.
 
 ## Moderation
 

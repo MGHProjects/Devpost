@@ -37,63 +37,67 @@ link here. It must be under 3 minutes. It is captured in the IWER Meta Quest 3
 emulator, which the rules allow ("via XR Simulator, or another equivalent
 emulator").
 
-## Description (about 550 words; the form suggests 500 or fewer)
+## Thumbnail and gallery
 
-**Inspiration.** Most hand-tracking games treat the hand as a controller
-without buttons. We wanted the shape of the hand to be the game. In HANDCAST
-your own hand is the only optic.
+- Thumbnail (3:2): `media/brand/handcast-thumbnail.png`.
+- Logo: `media/brand/handcast-logo.png` (transparent: `handcast-logo-transparent.png`),
+  emblem: `media/brand/handcast-emblem.png`.
+- Gallery: stills from the demo video (`media/stills/`).
+
+## Description (under 500 words)
+
+**Inspiration.** Most hand-tracking games treat the hand as a buttonless
+controller. In HANDCAST the shape of your hand is the game: your own hand is
+the only optic.
 
 **What it does.** A small glass bench appears on your real table through
 passthrough, with lamps, pools of light, crystals that each want one exact
-colour, and hush stones that must stay dark. Shape your hand in the
-light and hold still: molten glass flows from wrist to fingertips and freezes
-into a glass copy of that exact pose, all 25 joints. Slide your hand out and
-the glass stays. Light that enters one open end of a glass hand (the wrist, a
-palm resting in a pool, or an extended fingertip) leaves through every other
-open fingertip. An open hand fans light out, a flat hand on its edge is a
-mirror, a fist is a stone. Colours add: red and green make yellow. Pinch a
-glass hand's foot to slide and twist it, knock it over with a fist to get the
-glass back, or strum its fingers.
+colour, and hush stones that must stay dark. Shape your hand in the light and
+hold still: molten glass flows from wrist to fingertips and freezes into a
+glass copy of that exact pose, all 25 joints. Slide your hand out and the glass
+stays. Light entering any open end (the wrist, a palm in a pool, a fingertip)
+leaves through every other open fingertip.
+An open hand fans light out, a flat hand on its edge is a mirror, a fist is a
+stone. Colours add: red and green make yellow. Pinch a glass hand's foot to
+slide and twist it, knock it over with a fist to get the glass back, or strum
+its fingers.
 
-There are 49 boards in seven chapters, a Daily board that is the same for
-everyone, the Kiln for endless generated boards, and a Studio for building
-boards with your hands. Published boards go to the Hall of Hands; after you
-solve one, other players' glass hands fade in beside yours. Every crystal is a
-note and every board a chord, synthesised live.
+There are 49 boards in seven chapters, a shared Daily board, the Kiln's
+endless generated boards, and a Studio where you build a board by casting its
+solution. Published boards go to the Hall of Hands;
+after you solve one, other players' glass hands fade in beside yours. Every
+crystal is a note and every board a chord, synthesised live.
 
-**Why it is new.** Tabletop light-routing puzzles already ship: Lumen Lab VR
-on the Horizon Store (September 2026: "A table. A beam. Mirrors you pick up
-with your hands"), LaserBlaze, Labyrinth deLux, Carpe Lucem. Our first concept
-was the same kind of game, so we dropped it. We found no shipped game that freezes the
+**Why it is new.** Tabletop light-routing puzzles already ship (Lumen Lab VR
+on the Horizon Store in 2026, LaserBlaze, Labyrinth deLux, Carpe Lucem), so we
+dropped our first concept. We found no shipped game that freezes the
 player's own tracked hand pose into a persistent optic that is the puzzle
-piece. The loop cannot work with controllers, which have no fingers to open or
+piece. The loop cannot work with controllers: they have no fingers to open or
 curl.
 
 **How we built it.** Immersive Web SDK (WebXR, three.js, ECS) in the Quest
-Browser. A 2D light tracer runs every frame with your live hands for display
-and with the glass hands alone for the solve check. A single-pass glass shader
-lights each finger from inside with the colour it carries. All sound is Web
-Audio synthesis with HRTF panning. Every campaign board comes from a
-solution-first generator and passes a validator: solvable, robust to hand
-wobble, and (after the first board) not solvable by a lazy open hand. 307 unit tests run on every
-build, and 20 end-to-end checks drive emulated hands.
+Browser. A 2D light tracer runs every frame, with live hands for display and
+glass hands alone for the solve check. All sound is Web Audio
+synthesis with HRTF panning. Every board comes from a solution-first generator
+and passes a validator: solvable, robust to hand wobble, every hand needed,
+and (after the first board) not solvable by a lazy open hand. Unit tests run on every build, and the
+end-to-end suite casts every campaign board through emulated hand tracking.
 
-**Hands-first design.** You find the table by resting a flat
-hand on it; everything is seated and within reach. Looking at a crystal makes
-it sing and names the colour it needs.
+**Hands-first design.** Seated and within reach: you find the table by
+resting a flat hand on it, and looking at a crystal makes it sing and names
+its colour.
 
-**Challenges.** Making "hold still" dependable on jittery tracking, stopping
-fingers from flickering between open and closed, and making a twist precise
-enough to aim a beam.
+**Challenges.** A dependable "hold still" on jittery tracking, fingers that
+never flicker between open and closed, and twists precise enough to aim a
+beam.
 
-**Accomplishments.** A complete game loop with no controller anywhere.
-Published hands are retargeted to
-standard bone lengths, so hand size never leaves the headset; names are
-generated, the middle-finger gesture is rejected, and the optional server
+**Accomplishments.** A complete game with no controller anywhere. Shared
+hands are retargeted to standard bone lengths (hand size never leaves the
+headset), names are generated, offensive gestures are rejected, and the server
 re-traces every solution.
 
-**What's next.** Testing with more real hands, more chapters, ink pots that
-tint a finger, and a Horizon Store release.
+**What's next.** More chapters, ink pots that tint a finger, and a Horizon
+Store release.
 
 ## How hand interactions are implemented (optional field)
 
@@ -113,11 +117,14 @@ tint a finger, and a Horizon Store release.
   its mean, every fingertip within 10 mm and the palm normal within 4 degrees;
   one bad sample is forgiven.
 - **Casting.** A hand over the bench (palm less than 11 cm above it) that is
-  lit (a fan hand receiving light, or a blade or fist touched by a beam) and
+  lit (a fan hand receiving light, or a blade or fist touched by a beam
+  anywhere along it) and
   still fills a casting meter in 0.7 s, or 1.2 s in Steady mode; moving drains
   it twice as fast. When it fills, the pose is the average of the last 8 raw
   frames, which removes jitter without filter lag. That hand must then move
-  7 cm before it can cast again.
+  7 cm before it can cast again (also after a grab, a Studio placement or an
+  erase). A tracking gap under 0.25 s keeps the hold, the grab and the
+  stillness window, so a palm flickering on the table does not start over.
 - **Slide and twist.** A pinch that starts within 4 cm of a glass hand's foot
   grabs it. The glass follows the pinch point. Twist is a swing-twist
   decomposition of the wrist rotation about the bench's up axis, unwrapped past

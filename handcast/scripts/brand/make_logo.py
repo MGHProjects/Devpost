@@ -362,6 +362,18 @@ def card_page(kind, url=''):
     return page(body, w, h)
 
 
+def thumbnail_page(w=1500, h=1000):
+    """Devpost thumbnail (3:2): emblem over the wordmark, centred."""
+    body = f'''<div style="position:absolute;inset:0;background:radial-gradient(ellipse at 50% 42%, #121a2c 0%, #090c15 55%, {BG} 100%)"></div>
+    <div style="position:absolute;left:{(w - 700) // 2}px;top:34px;width:700px;height:700px">{emblem_svg(700, uid="b", background=False, margin=40)}</div>
+    <div style="position:absolute;left:0;right:0;top:700px;display:flex;flex-direction:column;align-items:center;gap:26px">
+      {wordmark(104)}
+      <div class="rule" style="width:640px"></div>
+      <span class="mono" style="font-size:22px;margin-right:-0.32em">Your hand is the optic</span>
+    </div>'''
+    return page(body, w, h)
+
+
 def render(html, out_png, w, h, transparent=False):
     tmp = OUT / f'.{out_png.stem}.html'
     tmp.write_text(html)
@@ -379,6 +391,7 @@ def main():
     render(emblem_page(1024, False), OUT / 'handcast-emblem-transparent.png', 1024, 1024, transparent=True)
     render(lockup_page(1600, 560, True), OUT / 'handcast-logo.png', 1600, 560)
     render(lockup_page(1600, 560, False), OUT / 'handcast-logo-transparent.png', 1600, 560, transparent=True)
+    render(thumbnail_page(), OUT / 'handcast-thumbnail.png', 1500, 1000)
     render(card_page('title'), OUT / 'card-title.png', 1280, 720)
     render(card_page('end', url), OUT / 'card-end.png', 1280, 720)
 

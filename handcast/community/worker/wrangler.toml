@@ -11,3 +11,7 @@ binding = "HALL"
 database_name = "handcast-hall"
 # Paste the id printed by `wrangler d1 create handcast-hall`:
 database_id = "00000000-0000-0000-0000-000000000000"
+
+# Prune old rate-limit windows every 30 minutes.
+[triggers]
+crons = ["*/30 * * * *"]

@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import worker, { type D1Database, type D1PreparedStatement, type D1Result, type Env } from '../community/worker/src/index';
+import worker, { networkKey, type D1Database, type D1PreparedStatement, type D1Result, type Env } from '../community/worker/src/index';
 import { HallClient, MemoryStorage, type HallEntry } from '../src/community/client';
 import { buildFeaturedLevels } from '../src/community/featured';
 import { decodeCast, decodeLevel, encodeCast, encodeLevel, poseToCast } from '../src/core/codec';
@@ -108,11 +108,17 @@ async function publish(level: LevelDef, device = 'device-aaaa-0001') {
   return call('POST', '/levels', { body: { code: await encodeLevel(level) }, device });
 }
 
+/** Submits the level's own reference solution as `device` (from `ip`). */
+async function solveAs(id: string, level: LevelDef, device: string, ip?: string) {
+  const casts = await Promise.all(level.solution!.map(encodeCast));
+  return call('POST', `/levels/${id}/solutions`, { body: { casts }, device, ip });
+}
+
 const d = sqlite ? describe : describe.skip;
 
 d('Hall Worker', () => {
   beforeEach(() => {
-    env = { HALL: fakeD1(), ALLOWED_ORIGIN: ORIGIN };
+    env = { HALL: fakeD1(), ALLOWED_ORIGIN: ORIGIN, HASH_SALT: 'test-salt' };
     ipSeq++;
   });
 
@@ -195,6 +201,11 @@ d('Hall Worker', () => {
   it('likes are idempotent per device; top sorts by likes', async () => {
     const a = (await body<{ entry: HallEntry }>(await publish(first()))).entry;
     const b = (await body<{ entry: HallEntry }>(await publish(buildFeaturedLevels()[1]))).entry;
+    // Only players who solved a board can like it.
+    const early = await call('POST', `/levels/${a.id}/like`, { device: 'liker-0000-0001' });
+    expect(early.status).toBe(403);
+    expect(await body(early)).toMatchObject({ error: 'solve_first' });
+    for (const d of ['liker-0000-0001', 'liker-0000-0002']) expect((await solveAs(a.id, first(), d)).status).toBe(200);
     expect(await body(await call('POST', `/levels/${a.id}/like`, { device: 'liker-0000-0001' }))).toMatchObject({ likes: 1, changed: true });
     expect(await body(await call('POST', `/levels/${a.id}/like`, { device: 'liker-0000-0001' }))).toMatchObject({ likes: 1, changed: false });
     expect(await body(await call('POST', `/levels/${a.id}/like`, { device: 'liker-0000-0002' }))).toMatchObject({ likes: 2 });
@@ -209,16 +220,68 @@ d('Hall Worker', () => {
     expect(next.cursor).toBeNull();
   });
 
-  it('hides a level after 3 reports from different devices', async () => {
+  it('hides a level after reports from 3 distinct networks', async () => {
     const { entry } = await body<{ entry: HallEntry }>(await publish(first()));
     for (let i = 0; i < 2; i++) {
-      await call('POST', `/levels/${entry.id}/report`, { body: { reason: 'spam' }, device: `report-0000-000${i}` });
+      await call('POST', `/levels/${entry.id}/report`, { body: { reason: 'spam' }, device: `report-0000-000${i}`, ip: `10.${i}.0.1` });
     }
-    await call('POST', `/levels/${entry.id}/report`, { body: { reason: 'spam' }, device: 'report-0000-0000' }); // duplicate
+    await call('POST', `/levels/${entry.id}/report`, { body: { reason: 'spam' }, device: 'report-0000-0000', ip: '10.0.0.1' }); // duplicate
     expect((await call('GET', `/levels/${entry.id}`)).status).toBe(200);
-    await call('POST', `/levels/${entry.id}/report`, { body: { reason: 'offensive' }, device: 'report-0000-0009' });
+    await call('POST', `/levels/${entry.id}/report`, { body: { reason: 'offensive' }, device: 'report-0000-0009', ip: '10.9.0.1' });
     expect((await call('GET', `/levels/${entry.id}`)).status).toBe(404);
     expect((await body<{ entries: unknown[] }>(await call('GET', '/levels?sort=new'))).entries).toEqual([]);
+  });
+
+  it('made-up device ids from one network cannot hide a level, and featured levels are never auto-hidden', async () => {
+    const { entry } = await body<{ entry: HallEntry }>(await publish(first()));
+    for (let i = 0; i < 8; i++) {
+      // Same IPv6 /48, rotating the /64 and the device id.
+      await call('POST', `/levels/${entry.id}/report`, { body: { reason: 'spam' }, device: `sybil-0000-000${i}`, ip: `2001:db8:1:${i}::5` });
+    }
+    expect((await call('GET', `/levels/${entry.id}`)).status).toBe(200);
+    const f = (await body<{ entry: HallEntry }>(await publish(buildFeaturedLevels()[1]))).entry;
+    await env.HALL.prepare('UPDATE levels SET featured = 1 WHERE id = ?1').bind(f.id).run();
+    for (let i = 0; i < 5; i++) await call('POST', `/levels/${f.id}/report`, { body: { reason: 'spam' }, device: `rep-0000-000${i}`, ip: `10.${i + 20}.0.1` });
+    expect((await call('GET', `/levels/${f.id}`)).status).toBe(200);
+  });
+
+  it('caps likes per network, whatever the device ids', async () => {
+    const a = (await body<{ entry: HallEntry }>(await publish(first()))).entry;
+    const likes: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const dev = `farm-0000-000${i}`;
+      // One IPv6 /64 (the low 64 bits rotate freely).
+      const ip = `2001:db8:aa:bb::${i + 1}`;
+      expect((await solveAs(a.id, first(), dev, ip)).status).toBe(200);
+      likes.push(Number((await body(await call('POST', `/levels/${a.id}/like`, { device: dev, ip }))).likes));
+    }
+    expect(likes).toEqual([1, 2, 3, 3, 3, 3]);
+  });
+
+  it('refuses writes without HASH_SALT (reads still work)', async () => {
+    env = { HALL: env.HALL, ALLOWED_ORIGIN: ORIGIN };
+    const res = await publish(first());
+    expect(res.status).toBe(503);
+    expect(await body(res)).toMatchObject({ error: 'misconfigured' });
+    expect((await call('GET', '/levels')).status).toBe(200);
+  });
+
+  it('refuses an oversized body without Content-Length (streamed)', async () => {
+    const big = new TextEncoder().encode(JSON.stringify({ code: 'A'.repeat(40000) }));
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        for (let o = 0; o < big.length; o += 4096) c.enqueue(big.subarray(o, o + 4096));
+        c.close();
+      },
+    });
+    const req = new Request('https://hall.test/levels', {
+      method: 'POST',
+      headers: { Origin: ORIGIN, 'X-Handcast-Device': 'device-aaaa-0001', 'CF-Connecting-IP': '10.0.0.1' },
+      body: stream,
+      duplex: 'half',
+    } as RequestInit);
+    expect(req.headers.get('Content-Length')).toBeNull();
+    expect((await worker.fetch(req, env, {})).status).toBe(413);
   });
 
   it('CORS: allowed origin and localhost get headers; other origins cannot write', async () => {
@@ -294,5 +357,17 @@ d('Hall Worker', () => {
 
     const rude = await maker.publishLevel(rudeBoard(), rudeBoard().solution!);
     expect(rude.ok).toBe(false);
+  });
+});
+
+describe('networkKey', () => {
+  it('keys IPv4 by address (or /24) and IPv6 by /64 (or /48)', () => {
+    expect(networkKey('203.0.113.7')).toBe('v4:203.0.113.7');
+    expect(networkKey('203.0.113.7', true)).toBe('v4:203.0.113');
+    expect(networkKey('2001:db8:1:2:3:4:5:6')).toBe('v6:2001:db8:1:2');
+    expect(networkKey('2001:0db8:0001:0002::9')).toBe('v6:2001:db8:1:2');
+    expect(networkKey('2001:db8:1:2::9', true)).toBe('v6:2001:db8:1');
+    expect(networkKey('::ffff:203.0.113.7')).toBe('v6:0:0:0:0');
+    expect(networkKey('unknown')).toBe('v4:unknown');
   });
 });

@@ -15,7 +15,12 @@
  *   POST /levels/:id/report       {reason}
  *   GET  /daily/:YYYY-MM-DD
  * CORS is locked to ALLOWED_ORIGIN (+ localhost); writes are rate limited per
- * device and per IP (D1 counters) and reads per IP (per-isolate memory).
+ * device and per network (D1 counters; IPv6 by /64) and reads per network
+ * (per-isolate memory). Device ids are self-asserted, so anything that
+ * counts people is also keyed by network: a like needs a verified solve
+ * from that device, and a level is hidden only by reports from several
+ * distinct networks (never a featured one). Writes refuse to run without
+ * HASH_SALT, the secret that salts every stored hash.
  */
 import { CodecError, decodeCast, decodeLevel, encodeCast, encodeLevel } from '../../../src/core/codec';
 import {
@@ -57,7 +62,12 @@ interface Ctx {
 // ------------------------------------------------------------------ limits
 
 const MAX_BODY = 16 * 1024;
+/** Reports from this many distinct networks (IPv4 /24, IPv6 /48) hide a level ... */
 const REPORTS_TO_HIDE = 3;
+/** ... and at least this share of its solvers when it is popular. */
+const REPORT_SHARE = 0.1;
+/** Likes counted per level from one network (IPv4 address, IPv6 /64). */
+const LIKES_PER_NETWORK = 3;
 const PAGE = 20;
 const MAX_PAGE = 50;
 const MAX_OFFSET = 5000;
@@ -109,16 +119,68 @@ function json(data: unknown, status: number, origin: string | null, extra?: Reco
   });
 }
 
+/** The 8 hextets of an IPv6 address (handles '::' and embedded IPv4), or null. */
+function ipv6Hextets(ip: string): string[] | null {
+  if (!ip.includes(':')) return null;
+  let s = ip.toLowerCase().replace(/%.*$/, '');
+  const v4 = /(\d+\.\d+\.\d+\.\d+)$/.exec(s);
+  if (v4) {
+    const o = v4[1].split('.').map(Number);
+    s = s.slice(0, -v4[1].length) + `${((o[0] << 8) | o[1]).toString(16)}:${((o[2] << 8) | o[3]).toString(16)}`;
+  }
+  const [head, tail] = s.split('::');
+  const h = head ? head.split(':') : [];
+  const t = tail !== undefined ? (tail ? tail.split(':') : []) : [];
+  const fill = s.includes('::') ? Array(Math.max(0, 8 - h.length - t.length)).fill('0') : [];
+  const all = [...h, ...fill, ...t].map((x) => x.replace(/^0+(?=.)/, ''));
+  return all.length === 8 ? all : null;
+}
+
+/**
+ * A client's network for rate limits and counting: an IPv4 address (or its /24
+ * when `coarse`), an IPv6 /64 (or /48). One subscriber controls a whole /64.
+ */
+export function networkKey(ip: string, coarse = false): string {
+  const v6 = ipv6Hextets(ip);
+  if (v6) return `v6:${v6.slice(0, coarse ? 3 : 4).join(':')}`;
+  if (coarse && /^\d+\.\d+\.\d+\.\d+$/.test(ip)) return `v4:${ip.split('.').slice(0, 3).join('.')}`;
+  return `v4:${ip}`;
+}
+
 async function sha(s: string): Promise<string> {
   const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
   return [...new Uint8Array(d)].slice(0, 16).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function readJson(req: Request): Promise<Record<string, unknown>> {
+/** Reads at most MAX_BODY bytes; a longer body (with or without Content-Length) is refused mid-stream. */
+async function readBody(req: Request): Promise<string> {
   const len = Number(req.headers.get('Content-Length') ?? '0');
   if (len > MAX_BODY) throw new HttpError(413, 'too_large', 'request body too large');
-  const text = await req.text();
-  if (text.length > MAX_BODY) throw new HttpError(413, 'too_large', 'request body too large');
+  if (!req.body) return '';
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_BODY) {
+      await reader.cancel().catch(() => undefined);
+      throw new HttpError(413, 'too_large', 'request body too large');
+    }
+    chunks.push(value);
+  }
+  const all = new Uint8Array(total);
+  let o = 0;
+  for (const c of chunks) {
+    all.set(c, o);
+    o += c.byteLength;
+  }
+  return new TextDecoder().decode(all);
+}
+
+async function readJson(req: Request): Promise<Record<string, unknown>> {
+  const text = await readBody(req);
   if (!text) return {};
   try {
     const v = JSON.parse(text) as unknown;
@@ -205,13 +267,18 @@ interface Req {
   url: URL;
   origin: string | null;
   now: number;
+  /** Salted hash of the client's network (IPv4 address / IPv6 /64). */
   ipHash: string;
+  /** Salted hash of the wider network (IPv4 /24 / IPv6 /48), for report quorum. */
+  netHash: string;
 }
 
 async function device(r: Req): Promise<{ id: string; hash: string }> {
+  // Unsalted hashes of IPs are reversible by enumeration: refuse to store any.
+  if (!r.env.HASH_SALT) throw new HttpError(503, 'misconfigured', 'the Hall is not configured for writes (HASH_SALT missing)');
   const id = r.req.headers.get('X-Handcast-Device') ?? '';
   if (!DEVICE_RE.test(id)) throw new HttpError(400, 'no_device', 'missing or bad X-Handcast-Device header');
-  return { id, hash: await sha(`dev:${r.env.HASH_SALT ?? ''}:${id}`) };
+  return { id, hash: await sha(`dev:${r.env.HASH_SALT}:${id}`) };
 }
 
 async function guardWrite(r: Req, kind: WriteKind): Promise<{ id: string; hash: string }> {
@@ -345,11 +412,18 @@ async function listHands(r: Req, id: string): Promise<Response> {
 async function like(r: Req, id: string): Promise<Response> {
   const dev = await guardWrite(r, 'like');
   await getLevelRow(r.env, id);
-  const ins = await r.env.HALL
-    .prepare('INSERT OR IGNORE INTO likes (level_id, device_hash, created_at) VALUES (?1, ?2, ?3)')
-    .bind(id, dev.hash, r.now)
-    .run();
-  const changed = (ins.meta.changes ?? 0) > 0;
+  const db = r.env.HALL;
+  const solved = await db.prepare('SELECT 1 AS x FROM solutions WHERE level_id = ?1 AND device_hash = ?2 LIMIT 1').bind(id, dev.hash).first();
+  if (!solved) throw new HttpError(403, 'solve_first', 'solve a board before you like it');
+  const fromNet = await db.prepare('SELECT COUNT(*) AS n FROM likes WHERE level_id = ?1 AND ip_hash = ?2').bind(id, r.ipHash).first<{ n: number }>();
+  let changed = false;
+  if (Number(fromNet?.n ?? 0) < LIKES_PER_NETWORK) {
+    const ins = await db
+      .prepare('INSERT OR IGNORE INTO likes (level_id, device_hash, ip_hash, created_at) VALUES (?1, ?2, ?3, ?4)')
+      .bind(id, dev.hash, r.ipHash, r.now)
+      .run();
+    changed = (ins.meta.changes ?? 0) > 0;
+  }
   if (changed) await r.env.HALL.prepare('UPDATE levels SET likes = likes + 1 WHERE id = ?1').bind(id).run();
   const row = await getLevelRow(r.env, id);
   return json({ liked: true, changed, likes: Number(row.likes) }, 200, r.origin);
@@ -360,15 +434,24 @@ async function report(r: Req, id: string): Promise<Response> {
   await getLevelRow(r.env, id);
   const body = await readJson(r.req);
   const reason = typeof body.reason === 'string' && REPORT_REASONS.has(body.reason) ? body.reason : 'other';
-  const ins = await r.env.HALL
-    .prepare('INSERT OR IGNORE INTO reports (level_id, device_hash, reason, created_at) VALUES (?1, ?2, ?3, ?4)')
-    .bind(id, dev.hash, reason, r.now)
+  const db = r.env.HALL;
+  const ins = await db
+    .prepare('INSERT OR IGNORE INTO reports (level_id, device_hash, net_hash, reason, created_at) VALUES (?1, ?2, ?3, ?4, ?5)')
+    .bind(id, dev.hash, r.netHash, reason, r.now)
     .run();
   if ((ins.meta.changes ?? 0) > 0) {
-    await r.env.HALL
-      .prepare(`UPDATE levels SET reports = reports + 1, hidden = CASE WHEN reports + 1 >= ${REPORTS_TO_HIDE} THEN 1 ELSE hidden END WHERE id = ?1`)
-      .bind(id)
-      .run();
+    await db.prepare('UPDATE levels SET reports = reports + 1 WHERE id = ?1').bind(id).run();
+    // Device ids are free: only reports from several distinct networks, and a
+    // share of the solvers on popular boards, hide a level. Featured levels are
+    // curated and never hidden automatically (the owner reviews `reports`).
+    const [nets, row] = await Promise.all([
+      db.prepare('SELECT COUNT(DISTINCT net_hash) AS n FROM reports WHERE level_id = ?1').bind(id).first<{ n: number }>(),
+      db.prepare('SELECT solves, featured FROM levels WHERE id = ?1').bind(id).first<{ solves: number; featured: number }>(),
+    ]);
+    const quorum = Math.max(REPORTS_TO_HIDE, Math.ceil(Number(row?.solves ?? 0) * REPORT_SHARE));
+    if (!row?.featured && Number(nets?.n ?? 0) >= quorum) {
+      await db.prepare('UPDATE levels SET hidden = 1 WHERE id = ?1').bind(id).run();
+    }
   }
   return json({ reported: true }, 200, r.origin);
 }
@@ -414,9 +497,10 @@ export async function handle(req: Request, env: Env, ctx?: Ctx): Promise<Respons
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(allowed) });
     const now = Date.now();
     const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown';
-    const ipHash = await sha(`ip:${env.HASH_SALT ?? ''}:${ip}`);
+    const ipHash = await sha(`ip:${env.HASH_SALT ?? ''}:${networkKey(ip)}`);
+    const netHash = await sha(`net:${env.HASH_SALT ?? ''}:${networkKey(ip, true)}`);
     if (readLimited(ipHash, now)) throw new HttpError(429, 'rate_limited', 'too many requests, slow down');
-    const r: Req = { req, env, ctx, url, origin: allowed, now, ipHash };
+    const r: Req = { req, env, ctx, url, origin: allowed, now, ipHash, netHash };
 
     const parts = url.pathname.split('/').filter(Boolean);
     const [a, id, sub] = parts;
@@ -441,8 +525,16 @@ export async function handle(req: Request, env: Env, ctx?: Ctx): Promise<Respons
   }
 }
 
+/** Cron: drop rate-limit windows older than two hours (see wrangler.toml [triggers]). */
+export async function prune(env: Env, now = Date.now()): Promise<void> {
+  await env.HALL.prepare('DELETE FROM rate WHERE win < ?1').bind(Math.floor(now / HOUR) - 2).run();
+}
+
 export default {
   fetch(req: Request, env: Env, ctx: Ctx): Promise<Response> {
     return handle(req, env, ctx);
+  },
+  scheduled(_event: unknown, env: Env, ctx: Ctx): void {
+    ctx.waitUntil?.(prune(env));
   },
 };
