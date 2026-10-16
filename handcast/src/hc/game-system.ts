@@ -52,6 +52,7 @@ import { CastView } from '../render/glass/cast-view.js';
 import { CoatMesh, createCoatMesh } from '../render/glass/coat-material.js';
 import { HandTemplate, loadHandTemplates } from '../render/glass/hand-model.js';
 import { Shatter } from '../render/glass/shatter.js';
+import { promoteHandOccluder } from '../render/glass/hand-occluder.js';
 import { castToPose, footOf, poseToCast, transformPose } from './pose-ops.js';
 import { Hud, HudHandlers } from './hud.js';
 import { LevelSource, levelSource, SLOT } from './level-source.js';
@@ -1296,6 +1297,7 @@ export class HandcastSystem extends createSystem({}) {
     const model = adapter?.visual?.model;
     const mesh = model?.getObjectByProperty('type', 'SkinnedMesh') as SkinnedMesh | undefined;
     if (!mesh || mesh === l.coatFor) return;
+    promoteHandOccluder(mesh);
     l.coat?.dispose();
     l.coat = createCoatMesh(mesh);
     l.coatFor = mesh;
