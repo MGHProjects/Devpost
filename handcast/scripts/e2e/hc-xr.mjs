@@ -86,6 +86,23 @@ export default async function run({ page, frame }) {
   check('a broken chord no longer reads as solved', !/Tap Next|sings|Campaign complete/.test(after), after);
   await hc(() => window.handcast.iwerHand('right', null));
 
+  // 4b. The system menu pauses: a pour in progress drains, no glass is cast,
+  // and closing it does not restart the table set-up.
+  await hc(() => window.handcast.load(0));
+  await wait(300);
+  const solP = await hc(() => window.handcast.solutionFoot(0));
+  await hc(([at, yaw]) => window.handcast.iwerHand('right', 'spread', at, yaw), [solP.at, solP.yaw]);
+  await waitFor(() => window.handcast.state().live[1].progress > 0.2, 4000);
+  const paused = await hc(() => window.handcast.systemMenu(true));
+  await wait(1500);
+  st = await hc(() => window.handcast.state());
+  check('system menu pauses: the pour drains and nothing is cast', paused.paused && st.casts === 0 && st.live[1].progress === 0, `paused=${paused.paused} casts=${st.casts} progress=${st.live[1].progress}`);
+  const resumed = await hc(() => window.handcast.systemMenu(false));
+  await waitFor(() => window.handcast.state().casts === 1, 5000);
+  st = await hc(() => window.handcast.state());
+  check('closing the system menu resumes without a new set-up', !resumed.paused && !st.calibrating && st.placed && st.casts === 1, `calibrating=${st.calibrating} placed=${st.placed} casts=${st.casts}`);
+  await hc(() => window.handcast.iwerHand('right', null));
+
   // 5. Board 2 ("One"): an open hand wakes a hush stone and does not cast; the point solves it.
   await hc(() => window.handcast.load(1));
   await wait(300);
@@ -97,7 +114,8 @@ export default async function run({ page, frame }) {
   st = await hc(() => window.handcast.state());
   check('wrong shape wakes a hush stone and does not cast', st.hush.some((h) => h) && st.casts === 0, `hush=${st.hush} casts=${st.casts} lvl=${lvl}`);
   await hc(() => window.handcast.iwerSolution(0));
-  const pointCast = await waitFor(() => window.handcast.state().solved, 9000);
+  // Headless (software GL) runs game time at about a third of wall time: a cast takes 5-7 s here.
+  const pointCast = await waitFor(() => window.handcast.state().solved, 15000);
   st = await hc(() => window.handcast.state());
   check('point shape solves board 2', pointCast, `crystals=${st.crystals} hush=${st.hush} casts=${st.casts}`);
   await hc(() => window.handcast.iwerHand('right', null));
@@ -107,7 +125,7 @@ export default async function run({ page, frame }) {
   await hc(() => window.handcast.load(window.handcast.levels().indexOf('mirror-1')));
   await wait(300);
   await hc(() => window.handcast.iwerSolution(0));
-  const blade = await waitFor(() => window.handcast.state().solved, 9000);
+  const blade = await waitFor(() => window.handcast.state().solved, 15000);
   st = await hc(() => window.handcast.state());
   check('blade hand casts a glass mirror that solves Mirror Palm 1', blade && st.casts === 1, `mode=${st.live[1].mode} crystals=${st.crystals} casts=${st.casts}`);
   await hc(() => window.handcast.iwerHand('right', null));

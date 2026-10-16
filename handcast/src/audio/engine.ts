@@ -12,6 +12,9 @@
 import { GlassVoices } from './voices.js';
 
 const midiToFreq = (m: number): number => 440 * 2 ** ((m - 69) / 12);
+const MASTER_GAIN = 0.8;
+/** While the Quest system menu is up. */
+const DUCKED_GAIN = 0.12;
 
 export type TickKind = 'pick' | 'place' | 'rotate' | 'return' | 'deny' | 'ui';
 
@@ -56,6 +59,7 @@ export class AudioEngine {
   /** Added to the context clock; used when replaying a log offline. */
   private offset = 0;
   muted = false;
+  ducked = false;
   /** Glass-specific voices (molten, ting, shatter, pluck, hush, flow); null until attached. */
   voices: GlassVoices | null = null;
 
@@ -88,7 +92,7 @@ export class AudioEngine {
     comp.attack.value = 0.004;
     comp.release.value = 0.25;
     this.master = ctx.createGain();
-    this.master.gain.value = this.muted ? 0 : 0.8;
+    this.master.gain.value = this.muted ? 0 : this.ducked ? DUCKED_GAIN : MASTER_GAIN;
     this.master.connect(comp).connect(ctx.destination);
     this.dry = ctx.createGain();
     this.dry.connect(this.master);
@@ -354,9 +358,20 @@ export class AudioEngine {
   setMuted(muted: boolean): void {
     this.muted = muted;
     if (this.voices) this.voices.muted = muted;
+    this.applyMaster(0.05);
+  }
+
+  /** Quiets everything while the system menu covers the app (the player's mute is separate). */
+  setDucked(ducked: boolean): void {
+    if (ducked === this.ducked) return;
+    this.ducked = ducked;
+    this.applyMaster(0.15);
+  }
+
+  private applyMaster(tau: number): void {
     const ctx = this.ctx;
     if (!ctx) return;
-    this.master.gain.setTargetAtTime(muted ? 0 : 0.8, ctx.currentTime, 0.05);
+    this.master.gain.setTargetAtTime(this.muted ? 0 : this.ducked ? DUCKED_GAIN : MASTER_GAIN, ctx.currentTime, tau);
   }
 
   /** Render a recorded event log to an AudioBuffer (for the demo video). */

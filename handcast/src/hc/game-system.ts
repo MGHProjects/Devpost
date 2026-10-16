@@ -142,6 +142,10 @@ export class HandcastSystem extends createSystem({}) {
   private beams: BeamRenderer2D | null = null;
   private table = new TableAnchor();
   private frameRate = new FrameRateGovernor();
+  /** In an immersive session (Visible or VisibleBlurred). */
+  private immersive = false;
+  /** The system menu covers the app: hands are ignored and sound is ducked. */
+  private paused = false;
   /** The status line shown on the last solve, replaced if the chord breaks. */
   private solvedStatus = '';
 
@@ -257,10 +261,16 @@ export class HandcastSystem extends createSystem({}) {
         const immersive = vs !== VisibilityState.NonImmersive;
         this.world.scene.background = immersive ? null : this.backdrop;
         this.enterButton?.setImmersive(immersive);
+        // The Quest system menu (VisibleBlurred) pauses play; coming back from it
+        // is not a new session, so it must not restart calibration.
+        this.setPaused(vs === VisibilityState.VisibleBlurred);
         if (immersive) {
+          if (this.immersive) return;
+          this.immersive = true;
           this.audio.unlock();
           this.enterXR();
         } else {
+          this.immersive = false;
           this.exitXR();
         }
       }),
@@ -1046,7 +1056,7 @@ export class HandcastSystem extends createSystem({}) {
 
   private updateHands(dt: number): void {
     const xr = this.world.renderer.xr;
-    if (!xr.isPresenting) {
+    if (!xr.isPresenting || this.paused) {
       for (const l of this.live) l.optic = null;
       return;
     }
@@ -1335,6 +1345,29 @@ export class HandcastSystem extends createSystem({}) {
       // Already placed meanwhile (a fallback or a scripted placement): keep it.
       if (!found && !this.progress.calibrated && !this.placed) this.startCalibration();
     });
+  }
+
+  private setPaused(on: boolean): void {
+    if (on === this.paused) return;
+    this.paused = on;
+    this.audio.setDucked(on);
+    if (!on) return;
+    // Whatever the hands were doing ends here: a held glass hand is set down,
+    // a pour in progress drains, and tracking restarts fresh on return (the
+    // hands are not reported while the menu is up).
+    this.calibHold = 0;
+    for (const l of this.live) {
+      this.releaseGrab(l);
+      l.studioPinch = false;
+      l.optic = null;
+      l.lockFoot = null;
+      l.progress = 0;
+      this.setCasting(l, 0);
+      l.coat?.setVisible(false);
+      l.hand.stillness.reset();
+      l.hand.lose();
+      l.hand.lose(LOSS_GRACE + 1);
+    }
   }
 
   private exitXR(): void {
@@ -1834,6 +1867,14 @@ export class HandcastSystem extends createSystem({}) {
       },
       xrActive: () => this.world.renderer.xr.isPresenting,
       frameRate: () => this.frameRate.rate,
+      /** Simulates the Quest system menu opening (true) or closing (false) in IWER. */
+      systemMenu: async (open: boolean) => {
+        const dev = (window as unknown as { IWER_DEVICE?: { updateVisibilityState(s: string): void } }).IWER_DEVICE;
+        dev?.updateVisibilityState(open ? 'visible-blurred' : 'visible');
+        // IWSDK copies the session's state into world.visibilityState each frame.
+        for (let i = 0; i < 3; i++) await new Promise((r) => requestAnimationFrame(r));
+        return { paused: this.paused, calibrating: this.calibrating, placed: this.placed };
+      },
       /**
        * Emulator only: shape an IWER hand into a pose-library pose at a bench
        * position (or hide it with name = null). Drives the real tracking path.
