@@ -18,7 +18,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The competition rules: an entry "modified after the submission deadline may
+  # be disqualified", and the build must stay as submitted until winners are
+  # announced (Dec 11, 2026). So no deploy after Nov 18, 2026 12:00 PST, and none
+  # at all once the repository variable HANDCAST_FROZEN is set to 1 (set it right
+  # after the final deploy).
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse to deploy after the deadline or while frozen
+        env:
+          FROZEN: ${{ vars.HANDCAST_FROZEN }}
+        run: |
+          deadline=$(date -u -d '2026-11-18T20:00:00Z' +%s)
+          now=$(date -u +%s)
+          if [ "$now" -ge "$deadline" ]; then
+            echo "::error::Submission deadline passed (2026-11-18 12:00 PST): the live build is frozen."
+            exit 1
+          fi
+          if [ "$FROZEN" = "1" ]; then
+            echo "::error::HANDCAST_FROZEN=1: deploys are frozen. Unset the repository variable to deploy."
+            exit 1
+          fi
+
   build:
+    needs: guard
     runs-on: ubuntu-latest
     defaults:
       run:
