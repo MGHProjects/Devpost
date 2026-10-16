@@ -1409,6 +1409,7 @@ export class HandcastSystem extends createSystem({}) {
   private finishPlacement(persist = true): void {
     this.calibrating = false;
     this.placed = true;
+    this.fallbackPlaced = !persist;
     this.pendingPlace = false;
     this.benchRoot.visible = true;
     this.benchRoot.updateWorldMatrix(true, false);
@@ -1498,7 +1499,8 @@ export class HandcastSystem extends createSystem({}) {
     if (!this.world.renderer.xr.isPresenting || this.calibrating) return;
     const xr = this.world.renderer.xr;
     if (this.table.update(xr.getFrame(), xr.getReferenceSpace(), this.player.matrixWorld, this.v1, this.q1)) {
-      if (this.pendingPlace || !this.placed) {
+      // A saved table anchor that comes back late still wins over a fallback bench.
+      if (this.pendingPlace || !this.placed || this.fallbackPlaced) {
         this.readHead();
         if (this.v1.distanceTo(this.headPos) < 1.6) {
           this.benchRoot.position.copy(this.v1);
@@ -1506,6 +1508,7 @@ export class HandcastSystem extends createSystem({}) {
           this.benchRoot.rotation.set(0, Math.atan2(-this.v2.x, -this.v2.z), 0);
           this.placed = true;
           this.pendingPlace = false;
+          this.fallbackPlaced = false;
           this.benchRoot.visible = true;
           this.ambience.setBenchCenter(this.benchRoot.getWorldPosition(this.v2));
         }
@@ -1517,6 +1520,8 @@ export class HandcastSystem extends createSystem({}) {
     }
   }
   private restoreAt = 0;
+  /** The bench sits where placeInFront() put it, not on a saved table anchor. */
+  private fallbackPlaced = false;
 
   // ------------------------------------------------------------------ demo (desktop attract mode)
 
