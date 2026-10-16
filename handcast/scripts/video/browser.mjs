@@ -1,7 +1,7 @@
 // Launch a private Chromium on the dev server with the IWER emulator active.
 import { chromium } from 'playwright';
 
-export async function openApp({ width = 1280, height = 720, url = 'https://localhost:8081/' } = {}) {
+export async function openApp({ width = 1280, height = 720, url = process.env.HC_URL ?? 'https://localhost:8081/' } = {}) {
   const browser = await chromium.launch({
     args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-certificate-errors', '--autoplay-policy=no-user-gesture-required'],
   });
