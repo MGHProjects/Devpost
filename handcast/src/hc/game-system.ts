@@ -39,6 +39,7 @@ import { canonicalPose, PoseName, POSES } from '../core/pose-library.js';
 import type { PoseShape } from '../core/pose-library.js';
 import { retargetCast } from '../core/privacy.js';
 import { traceLevel } from '../core/trace2d.js';
+import { pointSegDistSq } from '../core/vec2.js';
 import { HandOptic, HandPose, LevelDef, TraceResult, V2 } from '../core/types.js';
 import { TableAnchor } from '../input/anchor.js';
 import { isKnock, pinchGrabs, pluckCrossing, twistAngle, unwrapAngle, GESTURE } from '../input/gestures.js';
@@ -1071,10 +1072,10 @@ export class HandcastSystem extends createSystem({}) {
       for (let f = 0; f < io.inMask.length; f++) if (io.inMask[f] !== 0) return true;
       return false;
     }
-    // Mirrors and fists: armed when a beam touches them.
-    const [cx, cz] = o.center;
+    // Mirrors and fists: armed when a beam touches them anywhere (a blade
+    // reflects along its whole edge, fingers included, not only at the palm).
     for (const s of d.segments) {
-      if (Math.hypot(s.b[0] - cx, s.b[1] - cz) < 0.06 || Math.hypot(s.a[0] - cx, s.a[1] - cz) < 0.06) return true;
+      if (touchesOptic(o, s.a[0], s.a[1]) || touchesOptic(o, s.b[0], s.b[1])) return true;
     }
     return false;
   }
@@ -1793,6 +1794,17 @@ export class HandcastSystem extends createSystem({}) {
     };
     (window as unknown as { handcast: typeof api }).handcast = api;
   }
+}
+
+/** A beam end point at (x, z) lies on a blade's mirror or on the hand's body. */
+function touchesOptic(o: HandOptic, x: number, z: number): boolean {
+  const m = o.mirror;
+  if (m && pointSegDistSq(x, z, m.a[0], m.a[1], m.b[0], m.b[1]) < 0.015 * 0.015) return true;
+  for (const c of o.body) {
+    const r = c.r + 0.01;
+    if (pointSegDistSq(x, z, c.a[0], c.a[1], c.b[0], c.b[1]) < r * r) return true;
+  }
+  return Math.hypot(x - o.center[0], z - o.center[1]) < 0.06;
 }
 
 /** The trace result entry for a hand optic (indexed loop: no closure per frame). */

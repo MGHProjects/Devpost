@@ -99,5 +99,15 @@ export default async function run({ page, frame }) {
   st = await hc(() => window.handcast.state());
   check('point shape solves board 2', pointCast, `crystals=${st.crystals} hush=${st.hush} casts=${st.casts}`);
   await hc(() => window.handcast.iwerHand('right', null));
+  await wait(600);
+
+  // 6. Mirror Palm: a blade hand (on its pinky edge) reflecting the lamp sets into glass.
+  await hc(() => window.handcast.load(window.handcast.levels().indexOf('mirror-1')));
+  await wait(300);
+  await hc(() => window.handcast.iwerSolution(0));
+  const blade = await waitFor(() => window.handcast.state().solved, 9000);
+  st = await hc(() => window.handcast.state());
+  check('blade hand casts a glass mirror that solves Mirror Palm 1', blade && st.casts === 1, `mode=${st.live[1].mode} crystals=${st.crystals} casts=${st.casts}`);
+  await hc(() => window.handcast.iwerHand('right', null));
   return out.join('\n');
 }
