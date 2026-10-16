@@ -38,35 +38,38 @@ de cristal de otros jugadores). Detalles en
   congele en una pieza que es el puzzle. Además no se puede jugar con mandos,
   que encaja con el requisito "hands-first".
 
-## Estado (16 oct 2026)
+## Estado (16 oct 2026, tarde)
 
-- El juego se puede jugar entero con las manos: campaña, Daily, Horno,
-  Estudio y Hall of Hands.
-- 318 tests unitarios (15 ficheros) en verde y 21 de 21 comprobaciones
-  end-to-end con manos emuladas en el emulador IWER de Quest 3. Además, los
-  49 tableros de la campaña se resuelven moldeando sus manos de referencia
-  por la vía real del seguimiento de manos (`scripts/e2e/hc-campaign.mjs`).
-- Revisión adversarial aplicada: la demo de escritorio ya no cuenta como
-  progreso, un fallo de seguimiento de un fotograma no reinicia el moldeado,
-  la mano de canto (espejo) ya se vuelve de cristal, enlaces compartidos
-  validados, moderación reforzada y Worker endurecido.
-- Primera experiencia: botón **Enter XR** en la página 2D, si no encuentra la
-  mesa en 15 s coloca el banco delante de ti, avisa si sostienes los mandos,
-  explica "Hold still" mientras se forma el cristal, y el modo Steady tolera
-  más el temblor.
-- Logo y piezas gráficas en `handcast/media/brand/` (emblema, logotipo,
-  miniatura 3:2 para Devpost y tarjetas del vídeo).
-- **GitHub Pages ya funciona.** El workflow
-  `.github/workflows/handcast-pages.yml` publica desde la rama
-  `claude/clever-bell-ohs0lz`, y hoy https://mghprojects.github.io/Devpost/
-  sirve HANDCAST (último despliegue: 9 oct). Cada push a esa rama o a `main`
-  que toque `handcast/` vuelve a publicar.
-- El backend del Hall (Cloudflare Worker + D1) está escrito y probado, pero no
-  desplegado; la versión publicada usa el Hall sin conexión.
-- No consta que se haya probado todavía en unas Quest reales.
-- El vídeo de demo está en `handcast/media/handcast-demo.mp4` (2:00, grabado
-  en el emulador; se regenera con `scripts/video/record.mjs` +
-  `scripts/video/assemble.py`).
+- Re-análisis para ganar (reglas 2026, campo rival, ganadores de 2025,
+  capacidades de Quest Browser y una auditoría con ojos de juez):
+  **mantener la idea y ampliarla** donde la mano real toca la mesa real.
+  Objetivo: Best New Gaming Experience (100k / 50k). Congelar el 15 nov,
+  enviar el 16.
+- Hecho hoy, todo probado en el emulador:
+  - **Tu mano real delante de la luz** en passthrough (antes el banco se
+    pintaba encima de tu mano).
+  - **Mesa real:** el visor busca la mesa (planos o hit-test) y una mano de
+    cristal fantasma te enseña dónde apoyar la tuya; el banco **sale de tu
+    palma** con un arpegio y queda a ras del plano detectado.
+  - **Prólogo sin texto:** el tablero 1 enseña el gesto con una mano
+    fantasma; la pista es progresiva (primero el camino de la luz, luego la
+    mano); un cristal sin salida lo derriba un puño fantasma y te lo devuelve.
+  - **HUD oscuro**, fichas de color con letra por cristal, menú compacto,
+    modo **Large text** de alto contraste y fila **TOUR** (6 tableros para
+    los jueces).
+  - Pide **90 Hz** y baja a 72 si no llega; **pausa** con el menú del sistema.
+  - `?perf=1`: panel de rendimiento en XR e informe al salir.
+    `?capture`: modo de grabación (panel solo al mirarlo, `board=`/`tour=`,
+    WAV con el sonido del juego).
+  - La web **no se vuelve a publicar después del plazo** (o si pones la
+    variable `HANDCAST_FROZEN=1`).
+- Pruebas: 325 tests unitarios; end-to-end 21/21 (XR), 11/11 (Studio y
+  Hall), 4/4 (mesa), 3/3 (captura) y 49/49 tableros de la campaña.
+- **Aún no se ha probado en unas Quest reales.** Es lo más importante ahora:
+  guion en [`PRUEBA-QUEST3.md`](PRUEBA-QUEST3.md).
+- El backend del Hall está escrito y probado, pero no desplegado.
+- El vídeo actual (`handcast/media/handcast-demo.mp4`) es solo del emulador;
+  el plan es regrabarlo con tus Quest.
 
 ## Lo que tienes que hacer tú
 
@@ -80,18 +83,12 @@ Fecha límite: **18 nov 2026, 12:00 PST = 21:00 hora peninsular**.
 3. Para volver a publicar a mano: **Actions → Deploy Handcast to GitHub
    Pages → Run workflow**.
 
-### b) Probarlo en tus Meta Quest 3
+### b) Probarlo en tus Meta Quest 3 (18–19 oct)
 
-1. Activa el seguimiento de manos en las Quest y deja los mandos.
-2. Siéntate a una mesa y abre https://mghprojects.github.io/Devpost/ en el
-   navegador de las Quest (Meta Quest Browser). Pulsa **Enter XR** (el botón
-   de la parte inferior de la página).
-3. Apoya una mano plana sobre la mesa (palma abajo, dedos rectos) y quédate
-   quieto un segundo: el banco aparece bajo tu mano. Si en 15 s no la
-   encuentra, el banco aparece delante de ti. Para repetirlo: **Menu → Table**.
-4. Primer tablero: pon la mano abierta en el charco de luz y quédate quieto
-   hasta que se vuelva de cristal; luego saca la mano. Apunta cualquier cosa
-   que falle.
+Sigue el guion de [`PRUEBA-QUEST3.md`](PRUEBA-QUEST3.md) (60 minutos) con
+https://mghprojects.github.io/Devpost/?perf=1 y pégame el informe que sale al
+terminar. Para grabar clips: https://mghprojects.github.io/Devpost/?capture
+(añade `&tour=6` para abrir directamente *Count to Ten*).
 
 ### c) Opcional: backend del Hall of Hands
 
@@ -138,14 +135,16 @@ wrangler d1 create handcast-hall     # imprime un database_id
 
 ### e) Vídeo y formulario de Devpost
 
-1. Sube `handcast/media/handcast-demo.mp4` a YouTube (o Vimeo) como vídeo
-   **público**. Debe durar menos de 3 minutos; las reglas aceptan imágenes del
-   emulador.
+1. El vídeo se regrabará con tus Quest (sesiones de captura del 1–2 y 8–9
+   nov). Las reglas piden "gameplay real"; el vídeo actual del emulador queda
+   como reserva. Súbelo a YouTube como vídeo **público**, menos de 3 minutos.
 2. Rellena el formulario copiando [`handcast/SUBMISSION.md`](handcast/SUBMISSION.md).
    Faltan el enlace del vídeo, la fecha de lanzamiento prevista y el equipo
    (nombre, email y rol). Miniatura: `handcast/media/brand/handcast-thumbnail.png`;
    para la galería, fotogramas del vídeo.
 3. Envía antes del **18 nov 2026 a las 21:00 (hora peninsular)**. Después del
-   cierre no se puede cambiar el envío y se juzga el estado en esa fecha: no
-   hagas push que vuelva a publicar la web durante la evaluación, y mantén la
-   URL accesible.
+   cierre no se puede cambiar el envío y se juzga el estado en esa fecha.
+   El workflow ya se niega a publicar después del plazo; tras el último
+   despliegue, crea la variable de repositorio `HANDCAST_FROZEN` = `1`
+   (**Settings → Secrets and variables → Actions → Variables**) y mantén la URL
+   accesible hasta el 11 dic.
