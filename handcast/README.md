@@ -14,7 +14,8 @@ every other open fingertip, so the shape you made is the puzzle piece. There
 is no controller anywhere in the game.
 
 - **Play:** https://mghprojects.github.io/Devpost/ (Meta Quest Browser, tap
-  **Enter XR**, hand tracking on).
+  the **Enter XR** button at the bottom of the page, hand tracking on). If the
+  table is not found within 15 s, the bench appears in front of you.
 - **Competition:** Meta VR Start Developer Competition 2026, Gaming track,
   New Experience division. Submission text: [`SUBMISSION.md`](SUBMISSION.md).
 - **Content:** 49 campaign boards in 7 chapters, a Daily board, the Kiln
@@ -238,7 +239,9 @@ in 3D with HRTF panning.
   hands at once. Either hand can cast on any board. The reference solutions
   use both left and right hands, and we have not checked every board with one
   hand only.
-- **Steady mode** (Menu → Steady) slows the casting meter from 0.7 s to 1.2 s.
+- **Steady mode** (Menu → Steady) slows the casting meter from 0.7 s to 1.2 s
+  and doubles the stillness tolerances (palm 14 mm, fingertips 20 mm,
+  8 degrees, 3 stray samples), for hands with a tremor.
 - **Gaze help.** Look at a crystal to hear its note and read the colour it
   needs.
 - **Colour without hue.** The status line names colours in words, and crystal
@@ -290,9 +293,11 @@ community/worker/      Cloudflare Worker + D1 backend for the Hall (see its READ
 scripts/
   gen-campaign.ts      offline campaign / Daily generation
   gen-hand-bind.mjs    extracts the hand models' bind pose into src/core/hand-bind.ts
-  e2e/                 XR end-to-end scripts for the managed browser
-  video/               demo-video capture tools
-tests/                 vitest suites (14 files)
+  e2e/                 XR end-to-end scenarios (+ run-local.mjs: run them in a private headless browser)
+  video/               demo-video capture (record.mjs) and assembly (assemble.py)
+  brand/               logo, thumbnail and video cards (make_logo.py -> media/brand/)
+media/                 demo video and brand marks
+tests/                 vitest suites (15 files)
 ```
 
 `iwsdk.config.json` is the project authority: immersive AR (passthrough) with
@@ -309,7 +314,7 @@ npm install
 npm run dev          # iwsdk dev restart --open --foreground: Vite on port 8081 plus a
                      # managed browser with the IWER Meta Quest 3 emulator
 npm run typecheck    # tsc --noEmit
-npx vitest run       # 307 tests in 14 files (there is no "npm test" script)
+npx vitest run       # 318 tests in 15 files (there is no "npm test" script)
 npm run build        # static site in dist/
 npm run preview      # serve the build
 ```
@@ -332,8 +337,24 @@ print one PASS or FAIL line per check.
 ```bash
 npx @iwsdk/cli dev up --headless --allow-browser-automation
 npx @iwsdk/cli xr enter --input-json '{}'
-npx @iwsdk/cli browser run scripts/e2e/hc-xr.mjs       # 9 checks: cast, solve, withdraw, slide, knock, hush stone
+npx @iwsdk/cli browser run scripts/e2e/hc-xr.mjs       # 10 checks: cast, solve, withdraw, slide, knock, hush stone, blade
 npx @iwsdk/cli browser run scripts/e2e/hc-studio.mjs   # 11 checks: Studio, publish, Hall, solve rank
+```
+
+Without the managed browser (or past its 110 s script limit), run scenarios in
+a private headless Chromium against the dev server:
+
+```bash
+node scripts/e2e/run-local.mjs scripts/e2e/hc-xr.mjs scripts/e2e/hc-studio.mjs
+node scripts/e2e/run-local.mjs scripts/e2e/hc-campaign.mjs   # casts all 49 boards' reference hands (~10 min)
+```
+
+### Demo video and brand marks
+
+```bash
+node scripts/video/record.mjs artifacts/video            # frame-accurate capture in the emulator (~30 min)
+python3 scripts/video/assemble.py artifacts/video https://mghprojects.github.io/Devpost/
+python3 scripts/brand/make_logo.py                       # emblem, logo, thumbnail, video cards
 ```
 
 In the page, `window.handcast` exposes the debug API the scripts use

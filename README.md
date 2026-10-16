@@ -38,12 +38,24 @@ de cristal de otros jugadores). Detalles en
   congele en una pieza que es el puzzle. Además no se puede jugar con mandos,
   que encaja con el requisito "hands-first".
 
-## Estado (15 oct 2026)
+## Estado (16 oct 2026)
 
 - El juego se puede jugar entero con las manos: campaña, Daily, Horno,
   Estudio y Hall of Hands.
-- 307 tests unitarios (14 ficheros) en verde y 20 de 20 comprobaciones
-  end-to-end con manos emuladas en el emulador IWER de Quest 3.
+- 318 tests unitarios (15 ficheros) en verde y 21 de 21 comprobaciones
+  end-to-end con manos emuladas en el emulador IWER de Quest 3. Además, los
+  49 tableros de la campaña se resuelven moldeando sus manos de referencia
+  por la vía real del seguimiento de manos (`scripts/e2e/hc-campaign.mjs`).
+- Revisión adversarial aplicada: la demo de escritorio ya no cuenta como
+  progreso, un fallo de seguimiento de un fotograma no reinicia el moldeado,
+  la mano de canto (espejo) ya se vuelve de cristal, enlaces compartidos
+  validados, moderación reforzada y Worker endurecido.
+- Primera experiencia: botón **Enter XR** en la página 2D, si no encuentra la
+  mesa en 15 s coloca el banco delante de ti, avisa si sostienes los mandos,
+  explica "Hold still" mientras se forma el cristal, y el modo Steady tolera
+  más el temblor.
+- Logo y piezas gráficas en `handcast/media/brand/` (emblema, logotipo,
+  miniatura 3:2 para Devpost y tarjetas del vídeo).
 - **GitHub Pages ya funciona.** El workflow
   `.github/workflows/handcast-pages.yml` publica desde la rama
   `claude/clever-bell-ohs0lz`, y hoy https://mghprojects.github.io/Devpost/
@@ -52,9 +64,9 @@ de cristal de otros jugadores). Detalles en
 - El backend del Hall (Cloudflare Worker + D1) está escrito y probado, pero no
   desplegado; la versión publicada usa el Hall sin conexión.
 - No consta que se haya probado todavía en unas Quest reales.
-- El vídeo de demo irá en `handcast/media/handcast-demo.mp4` y aún no está.
-  Lo que hay ahora en `handcast/media/` (`prism-song-demo.mp4` y las capturas)
-  es del proyecto anterior: no lo uses.
+- El vídeo de demo está en `handcast/media/handcast-demo.mp4` (2:00, grabado
+  en el emulador; se regenera con `scripts/video/record.mjs` +
+  `scripts/video/assemble.py`).
 
 ## Lo que tienes que hacer tú
 
@@ -72,10 +84,11 @@ Fecha límite: **18 nov 2026, 12:00 PST = 21:00 hora peninsular**.
 
 1. Activa el seguimiento de manos en las Quest y deja los mandos.
 2. Siéntate a una mesa y abre https://mghprojects.github.io/Devpost/ en el
-   navegador de las Quest (Meta Quest Browser). Pulsa **Enter XR**.
+   navegador de las Quest (Meta Quest Browser). Pulsa **Enter XR** (el botón
+   de la parte inferior de la página).
 3. Apoya una mano plana sobre la mesa (palma abajo, dedos rectos) y quédate
-   quieto un segundo: el banco aparece bajo tu mano. Si hay que repetirlo:
-   **Menu → Table**.
+   quieto un segundo: el banco aparece bajo tu mano. Si en 15 s no la
+   encuentra, el banco aparece delante de ti. Para repetirlo: **Menu → Table**.
 4. Primer tablero: pon la mano abierta en el charco de luz y quédate quieto
    hasta que se vuelva de cristal; luego saca la mano. Apunta cualquier cosa
    que falle.
@@ -104,7 +117,7 @@ wrangler d1 create handcast-hall     # imprime un database_id
 
    ```bash
    wrangler d1 execute handcast-hall --remote --file=./schema.sql
-   wrangler secret put HASH_SALT        # recomendado: cualquier texto largo aleatorio
+   wrangler secret put HASH_SALT        # obligatorio: cualquier texto largo aleatorio (sin él, el Worker no acepta escrituras)
    wrangler deploy                      # imprime https://handcast-hall.<tu-subdominio>.workers.dev
    curl https://handcast-hall.<tu-subdominio>.workers.dev/levels?sort=new   # -> {"entries":[],"cursor":null}
    ```
@@ -130,8 +143,8 @@ wrangler d1 create handcast-hall     # imprime un database_id
    emulador.
 2. Rellena el formulario copiando [`handcast/SUBMISSION.md`](handcast/SUBMISSION.md).
    Faltan el enlace del vídeo, la fecha de lanzamiento prevista y el equipo
-   (nombre, email y rol). Para la galería usa capturas de HANDCAST, no las de
-   Prism Song.
+   (nombre, email y rol). Miniatura: `handcast/media/brand/handcast-thumbnail.png`;
+   para la galería, fotogramas del vídeo.
 3. Envía antes del **18 nov 2026 a las 21:00 (hora peninsular)**. Después del
    cierre no se puede cambiar el envío y se juzga el estado en esa fecha: no
    hagas push que vuelva a publicar la web durante la evaluación, y mantén la
