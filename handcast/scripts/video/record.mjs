@@ -96,6 +96,8 @@ const FK_DEFAULTS = { spread: 0, yaw: -Math.PI / 2, roll: 0, pitch: 0, lift: 0.0
 const full = (p) => ({ ...FK_DEFAULTS, ...p, curl: [...p.curl], at: [...p.at] });
 const RELAXED = { curl: [0.15, 0.15, 0.15, 0.15, 0.18], spread: 0.25, pitch: -0.2, lift: 0.05, thumbAbduct: 0 };
 const HEAD = { pos: [0, 1.06, -0.13], pitch: -46, yaw: 0 };
+/** The hand the Studio scene casts; the Hall scene solves that same board with it. */
+const STUDIO_PEACE = { hand: 'right', curl: [1, 0, 0, 1, 1], spread: 1, lift: 0.058, at: [0, 0.06], yaw: -Math.PI / 2 + 0.25 };
 
 const state = {
   head: { ...HEAD, pos: [...HEAD.pos] },
@@ -435,9 +437,8 @@ const scenes = [
     await ev(() => window.handcast.studio());
     await wait(0.6);
     caption('The Studio: make a puzzle in seconds.', 3.4);
-    const peace = { hand: 'right', curl: [1, 0, 0, 1, 1], spread: 1, lift: 0.058, at: [0, 0.06], yaw: -Math.PI / 2 + 0.25 };
     caption('Cast your solution in the light...', 3.8);
-    await castHand(peace, { approach: 1.4, settle: 2.2, out: 1.0 });
+    await castHand(full(STUDIO_PEACE), { approach: 1.4, settle: 2.2, out: 1.0 });
     caption('...and the Studio drops crystals where it shines, and hush stones where a lazy hand would spill.', 5.2);
     await ev(() => window.handcast.studioDrop());
     await wait(2.4);
@@ -473,8 +474,7 @@ const scenes = [
     await ev(() => window.handcast.hallPick(0));
     await tweenHead({ pitch: HEAD.pitch, yaw: HEAD.yaw }, 0.8);
     caption('Solve it, then the maker\'s glass hand appears beside yours.', 5);
-    const peace = { hand: 'right', curl: [1, 0, 0, 1, 1], spread: 1, lift: 0.058, at: [0.012, 0.075], yaw: -Math.PI / 2 + 0.12 };
-    await castHand(peace, { approach: 1.4, settle: 2.0, out: 1.0 });
+    await castHand(full(STUDIO_PEACE), { approach: 1.4, settle: 2.0, out: 1.0 });
     await wait(2.6);
     const s = await st();
     console.log('hall:', s.status);
