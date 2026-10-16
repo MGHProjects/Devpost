@@ -10,9 +10,9 @@ HANDCAST
 
 ## Tagline (140 characters max)
 
-> Your own hand is the only optic: shape it in the light, hold still, and it freezes into glass that steers beams into singing crystals.
+> Hold still and your hand turns to glass. Your frozen pose is the puzzle piece: it bends light on your real table.
 
-(134 characters)
+(113 characters)
 
 ## Track / Division
 
@@ -25,17 +25,20 @@ HANDCAST
 
 https://mghprojects.github.io/Devpost/
 
-Judges open it in the Meta Quest Browser and tap **Enter XR**. Play seated at
-a table with hand tracking on and the controllers put down. On first launch
-the game asks you to rest one hand flat on the table and hold still; that is
-how it finds the table.
+**Testing instructions** (also in the description): open the link in the
+Meta Quest Browser, turn hand tracking on and put the controllers down, sit at
+a table and tap **Enter XR** (allow the Spatial permission if asked, so the
+headset can see the table). Rest a flat hand on the table: the bench pours out
+from under your palm. Menu > **TOUR** plays six boards that show the range in
+about ten minutes.
 
 ## Demo video
 
-**TODO:** upload `media/handcast-demo.mp4` to YouTube (public) and paste the
-link here. It must be under 3 minutes. It is captured in the IWER Meta Quest 3
-emulator, which the rules allow ("via XR Simulator, or another equivalent
-emulator").
+**TODO:** re-cut on footage captured on a Meta Quest 3 (owner capture
+sessions, see `PRUEBA-QUEST3.md` and the video plan), under 3 minutes, every
+shot labelled "Captured on Meta Quest 3" or "Emulator". Upload to YouTube
+(public) and paste the link here. The current `media/handcast-demo.mp4` is
+emulator-only and is a fallback.
 
 ## Thumbnail and gallery
 
@@ -46,58 +49,54 @@ emulator").
 
 ## Description (under 500 words)
 
-**Inspiration.** Most hand-tracking games treat the hand as a buttonless
-controller. In HANDCAST the shape of your hand is the game: your own hand is
-the only optic.
+Rest your hand in a pool of light on your real table and hold still. Molten
+glass flows over your fingers and freezes into an exact copy of your pose. Slide your hand out: the glass stays, and its shape decides what it
+does to light. An open hand fans it, a flat hand on its edge mirrors it, a fist
+stops it. Light every crystal in its exact colour, keep the hush stones dark,
+and the board plays its chord. There are no mirrors to pick up. Your hand is
+the piece.
 
-**What it does.** A small glass bench appears on your real table through
-passthrough, with lamps, pools of light, crystals that each want one exact
-colour, and hush stones that must stay dark. Shape your hand in the light and
-hold still: molten glass flows from wrist to fingertips and freezes into a
-glass copy of that exact pose, all 25 joints. Slide your hand out and the glass
-stays. Light entering any open end (the wrist, a palm in a pool, a fingertip)
-leaves through every other open fingertip.
-An open hand fans light out, a flat hand on its edge is a mirror, a fist is a
-stone. Colours add: red and green make yellow. Pinch a glass hand's foot to
-slide and twist it, knock it over with a fist to get the glass back, or strum
-its fingers.
+**Testing instructions.** Meta Quest Browser, hand tracking on, controllers
+down, seated at a table. Tap Enter XR and allow Spatial if asked. Rest a flat
+hand on the table. Menu > TOUR plays six boards that show the range.
 
-There are 49 boards in seven chapters, a shared Daily board, the Kiln's
-endless generated boards, and a Studio where you build a board by casting its
-solution. Published boards go to the Hall of Hands;
-after you solve one, other players' glass hands fade in beside yours. Every
-crystal is a note and every board a chord, synthesised live.
+**Hands-first, end to end.** No controller anywhere: cast by holding still,
+pinch a glass hand's foot to slide and twist it, knock it over with a fist to
+get the glass back, strum its fingers. Controllers have no fingers to open or
+curl, so the game cannot exist on them.
 
-**Why it is new.** Tabletop light-routing puzzles already ship (Lumen Lab VR
-on the Horizon Store in 2026, LaserBlaze, Labyrinth deLux, Carpe Lucem), so we
-dropped our first concept. We found no shipped game that freezes the
-player's own tracked hand pose into a persistent optic that is the puzzle
-piece. The loop cannot work with controllers: they have no fingers to open or
-curl.
+**Your real table is the play surface.** The headset's view of the room
+(planes or depth hit-test) puts a ghost hand on your table before you do
+anything; your resting hand confirms it and the bench pours out from under your
+palm, flush with the tabletop and anchored for next time. Your real hand is
+drawn in front of the light, not under the bench.
 
-**How we built it.** Immersive Web SDK (WebXR, three.js, ECS) in the Quest
-Browser. A 2D light tracer runs every frame, with live hands for display and
-glass hands alone for the solve check. All sound is Web Audio
-synthesis with HRTF panning. Every board comes from a solution-first generator
-and passes a validator: solvable, robust to hand wobble, every hand needed,
-and (after the first board) not solvable by a lazy open hand. Unit tests run on every build, and the
-end-to-end suite casts every campaign board through emulated hand tracking.
+**Built for Quest 3 and the coming VR Glasses.** Essential UI sits in a narrow
+field of view; menus answer gaze plus pinch; 90 Hz, falling back to a steady
+72 when needed.
 
-**Hands-first design.** Seated and within reach: you find the table by
-resting a flat hand on it, and looking at a crystal makes it sing and names
-its colour.
+**Intent and tracking loss.** Hold-still tolerances (7 mm palm, 10 mm
+fingertips, 4 degrees), open/curled hysteresis, a 0.25 s gap tolerance, Steady
+mode, a hand that must lift off before it casts again, and a pause while the
+system menu is up. In the prologue a dead-end cast is knocked over by a ghost
+fist and refunded, so a newcomer never gets stuck.
 
-**Challenges.** A dependable "hold still" on jittery tracking, fingers that
-never flicker between open and closed, and twists precise enough to aim a
-beam.
+**Content and coming back.** 49 boards in seven chapters, a Daily with a
+streak, endless Kiln boards, and a Studio where you build a board by casting
+its answer and share it to the Hall of Hands. Hint shows the light path first,
+the hand only second. Every board is a chord, synthesised live.
 
-**Accomplishments.** A complete game with no controller anywhere. Shared
-hands are retargeted to standard bone lengths (hand size never leaves the
-headset), names are generated, offensive gestures are rejected, and the server
-re-traces every solution.
+**How we built it.** Immersive Web SDK (WebXR, three.js, ECS) and a 2D light
+tracer. Boards come from a solution-first generator and validator (solvable,
+wobble-robust, every hand needed); an end-to-end suite casts all 49 through
+emulated hand tracking.
 
-**What's next.** More chapters, ink pots that tint a finger, and a Horizon
-Store release.
+**Design insight.** Hand-shadow puzzles make you hold one hand still while the
+other works. Freezing the pose removes that strain and turns your hand into an
+object you can move, knock over, play and share.
+
+**What's next.** Ink that stains a finger, two hands touching to fuse glass,
+and a Meta Horizon Store release as a PWA (target Q1 2027).
 
 ## How hand interactions are implemented (optional field)
 
@@ -135,9 +134,22 @@ Store release.
   refunded.
 - **Pluck.** An index fingertip crossing an open glass finger (a 9 mm tine)
   faster than 0.15 m/s plays a plucked glass note, louder with speed.
-- **Table calibration.** Palm facing down, at least three long fingers
-  straight, held still for 0.8 s. The table height is taken from the
-  fingertips minus their joint radii, and the bench turns to face you.
+- **Table calibration.** While it waits, plane detection (from Space Setup)
+  or a hit-test along the head's forward ray finds a horizontal surface at
+  table height and a ghost glass hand presses flat on it. A real hand palm
+  down, at least three long fingers straight, held still for 0.8 s confirms it:
+  the hand glows with the molten coat while the hold builds, and the bench
+  takes the detected plane's height (or the fingertips minus their joint radii
+  when there is no plane). The bench pours out from under the palm and turns
+  to face you; that hand must lift off before it can cast. With no hand after
+  9 s the bench pours onto the detected table; with neither feature granted it
+  appears in front of you at 15 s. The table is saved as a persistent anchor.
+- **Your hand in front of the light.** IWSDK's depth-writing hand mesh is drawn
+  before the bench and grown 1.5 mm outside the skin, so in passthrough your
+  real hand covers the slab, beams and crystals behind it.
+- **System menu.** While the Quest menu is open, a held glass hand is set
+  down, a pour in progress drains and sound is ducked; tracking restarts fresh
+  when you come back.
 - **Gaze.** Head direction: a crystal within 6 degrees of where you look, for
   half a second, rings its note and the status line names its colour.
 - **Panels.** The menu panel takes a hand-ray pinch or a fingertip poke. Panel
@@ -153,18 +165,21 @@ Plain statements of fit with the special awards on the competition page:
 
 - **Boldest Original Concept:** the puzzle pieces are frozen copies of the
   player's own hand poses.
-- **Best First Five Minutes:** calibration is one gesture (rest a flat hand),
-  the first board is "rest your open hand in the pool", and the five prologue
-  boards each teach one idea.
+- **Best First Five Minutes:** a ghost hand shows the one gesture on your real
+  table, the bench pours out of your palm, board 1 shows its verb before any
+  words, Hint is progressive, and a dead-end cast in the prologue is knocked
+  over and refunded by a ghost fist (which also teaches the knock).
 - **Best Reason to Come Back:** the Daily board with a streak, the Kiln, and
   the Hall of Hands, where (with the online backend) you see how other players
 shaped their hands.
-- **Best Accessibility Forward Experience:** seated, one-handed gestures,
-  Steady mode, colour names in the status line and colour-blind glyphs on every
-  crystal.
+- (Not pitched, but present: seated play, one-handed gestures, Steady mode,
+  a large-text high-contrast HUD, colour letters on every crystal chip and
+  colour glyphs on every crystal.)
 
 For the judging criteria: Technical Implementation names hand tracking, gaze,
-passthrough and spatial anchoring, and HANDCAST uses all four. Polish names
+passthrough, spatial anchoring and FoV-aware design; HANDCAST uses all five,
+plus plane detection and depth hit-test to find the table (all optional, with
+a hand-rest fallback for rooms the headset has not scanned). Polish names
 sound design, and every sound is synthesised live, with sounds on the bench
 placed in 3D (HRTF).
 
