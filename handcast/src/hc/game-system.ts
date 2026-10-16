@@ -61,6 +61,7 @@ import { loadProgress, Progress, saveProgress } from './progress.js';
 import { sealMessage, StudioCursor, StudioSession, StudioTool } from './studio.js';
 import { createEnterXRButton, EnterXRButton } from './enter-xr.js';
 import { FrameRateGovernor } from './frame-rate.js';
+import { CAPTURE_LOOK_DEG, CAPTURE_MAX_AUDIO, captureOptions, offerAudioDownload } from './capture.js';
 import { PerfHand, PerfOverlay, perfEnabled, showPerfReport } from './perf-overlay.js';
 import { PerfEventKind, PerfStats } from './perf-stats.js';
 
@@ -197,6 +198,10 @@ export class HandcastSystem extends createSystem({}) {
   /** Hint stage 1: where the solution's light goes, drawn faint over the bench. */
   private hintBeams: BeamRenderer2D | null = null;
   private hintBeamsUntil = 0;
+  /** `?capture` (filming on a headset): panel only when looked at, game audio kept for a WAV. */
+  private capture = captureOptions();
+  private captureT0 = 0;
+  private captureLook = 0;
   /** Position in TOUR while touring (-1: not touring). */
   private tourAt = -1;
   /** Prologue: a ghost fist knocking a glass hand down (or only showing how). */
@@ -335,6 +340,7 @@ export class HandcastSystem extends createSystem({}) {
     void loadHandTemplates().then(async (t) => {
       this.templates = t;
       this.loadIndex(this.startIndex());
+      if (this.capture?.tour != null) this.startTour(this.capture.tour);
       await this.openShareLink();
     });
     const onHash = () => void this.openShareLink();
@@ -480,6 +486,8 @@ export class HandcastSystem extends createSystem({}) {
 
   private startIndex(): number {
     const levels = this.source.levels();
+    const asked = this.capture?.board ? levels.findIndex((l) => l.id === this.capture!.board) : -1;
+    if (asked >= 0) return asked;
     const cur = levels.findIndex((l) => l.id === this.progress.current);
     if (cur >= 0) return cur;
     const first = levels.findIndex((l) => !this.progress.solved.includes(l.id));
@@ -1536,6 +1544,10 @@ export class HandcastSystem extends createSystem({}) {
 
   private enterXR(): void {
     this.frameRate.begin(this.world.session);
+    if (this.capture) {
+      this.audio.log = [];
+      this.captureT0 = this.audio.clock();
+    }
     this.perfEvent('enter');
     if (this.mode === 'demo') {
       // Start the board fresh: the attract demo's glass hands are not the player's.
@@ -1601,6 +1613,34 @@ export class HandcastSystem extends createSystem({}) {
     if (this.level) this.perfOverlay.attach(this.benchRoot, this.level.bench.w, this.level.bench.d);
   }
 
+  /** After a `?capture` session: render the game's sound offline and offer it as a WAV. */
+  private saveCaptureAudio(): void {
+    const log = this.audio.log;
+    if (!this.capture || !log?.length) return;
+    this.audio.log = null;
+    const t0 = Math.max(this.captureT0, this.audio.clock() - CAPTURE_MAX_AUDIO);
+    const seconds = Math.min(CAPTURE_MAX_AUDIO, this.audio.clock() - t0 + 1);
+    void AudioEngine.renderOffline(log, seconds, t0).then(
+      (buf) => offerAudioDownload(encodeWav(buf), seconds),
+      (err) => console.warn('capture audio render failed', err),
+    );
+  }
+
+  /** Capture mode: the panel shows only while looked at (or while a menu is open). */
+  private updateCaptureHud(dt: number): void {
+    const hud = this.hud.object;
+    const sec = this.hud.section;
+    let want = sec !== 'play' && sec !== 'calibrate';
+    if (!want) {
+      hud.getWorldPosition(this.v3).sub(this.headPos);
+      const len = this.v3.length();
+      want = len > 1e-4 && this.v3.dot(this.headFwd) / len > Math.cos((CAPTURE_LOOK_DEG * Math.PI) / 180);
+    }
+    // Shows at once, hides after half a second (no flicker at the edge).
+    this.captureLook = want ? 0.5 : Math.max(0, this.captureLook - dt);
+    hud.visible = this.captureLook > 0;
+  }
+
   private setPaused(on: boolean): void {
     if (on === this.paused) return;
     this.paused = on;
@@ -1627,6 +1667,8 @@ export class HandcastSystem extends createSystem({}) {
 
   private exitXR(): void {
     this.frameRate.end();
+    this.saveCaptureAudio();
+    this.hud.object.visible = true;
     this.reportPerf();
     this.placed = false;
     this.calibrating = false;
@@ -2059,6 +2101,7 @@ export class HandcastSystem extends createSystem({}) {
     this.ambience.setDim(xr ? 0.35 : 0);
     this.ambience.update(dt, time);
     this.layoutHud();
+    if (this.capture && xr) this.updateCaptureHud(dt);
   }
 
   /** Controllers in hand instead of hands: say so (once until it changes). */
@@ -2274,6 +2317,10 @@ export class HandcastSystem extends createSystem({}) {
       },
       xrActive: () => this.world.renderer.xr.isPresenting,
       exitXR: () => this.world.exitXR(),
+      hudVisible: () => {
+        const v = this.hud.object.getWorldPosition(new Vector3()).sub(this.headPos);
+        return { vis: this.hud.object.visible, look: this.captureLook, cos: v.dot(this.headFwd) / v.length(), capture: !!this.capture, head: this.headPos.toArray(), fwd: this.headFwd.toArray() };
+      },
       /** Starts the judge's tour at board i (0-5); next() advances like the Next button. */
       tour: (i = 0) => {
         this.startTour(i);
