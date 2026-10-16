@@ -17,43 +17,70 @@ const ONLY = process.env.SCENES ? process.env.SCENES.split(',').map(Number) : nu
 rmSync(`${OUT}/frames`, { recursive: true, force: true });
 mkdirSync(`${OUT}/frames`, { recursive: true });
 
-const { browser, page, logs } = await openApp();
+// Each group of scenes records in its own fresh browser: a long software-
+// rendered session can lose the page, and a short one is cheap to retry.
+const SESSIONS = [[0, 1, 2, 3], [4], [5, 6, 7], [8, 9], [10]];
+let browser = null;
+let page = null;
+let logs = [];
+let LEVELS = [];
+let AUDIO_T0 = 0;
 const ev = (fn, arg) => page.evaluate(fn, arg);
-await ev(() => {
-  localStorage.clear();
-  window.__hcClock = { time: 0, dt: 0 };
-});
-await ev(() => window.handcast.enterXR());
-await page.waitForFunction(() => window.handcast.xrActive(), null, { timeout: 30000 });
-// Hide the emulator's overlay UI (device panel, gizmos) so frames show only the room and the app.
-await ev(() => {
-  for (const e of document.querySelectorAll('body > div')) if (getComputedStyle(e).zIndex === '999') e.style.display = 'none';
-  for (const c of document.querySelectorAll('canvas')) if (getComputedStyle(c).zIndex === '3') c.style.display = 'none';
-});
-await installGrabber(page, { brightness: 0.42 });
 
-// Seated player: put the bench on the table in front of them, then look down at it.
-const advance = async (sec) => {
-  const n = Math.round(sec * FPS);
-  for (let i = 0; i < n; i++) {
-    await ev(async (dt) => {
-      window.__hcClock.time += dt;
-      window.__hcClock.dt = dt;
-      await new Promise((r) => requestAnimationFrame(() => r()));
-    }, 1 / FPS);
-  }
-};
-await ev(() => {
-  window.handcast.setHead([0, 1.2, 0], 0, 0);
-  window.handcast.iwerHand('left', null);
-  window.handcast.iwerHand('right', null);
-});
-await advance(0.4);
-await ev(() => window.handcast.placeInFront(0.75));
-await advance(0.2);
-const LEVELS = await ev(() => window.handcast.levels());
-await ev(() => window.handcast.audioLogStart());
-const AUDIO_T0 = await ev(() => window.__hcClock.time);
+async function openSession() {
+  ({ browser, page, logs } = await openApp());
+  await ev(() => {
+    localStorage.clear();
+    window.__hcClock = { time: 0, dt: 0 };
+  });
+  await ev(() => window.handcast.enterXR());
+  await page.waitForFunction(() => window.handcast.xrActive(), null, { timeout: 30000 });
+  // Hide the emulator's overlay UI (device panel, gizmos) so frames show only the room and the app.
+  await ev(() => {
+    for (const e of document.querySelectorAll('body > div')) if (getComputedStyle(e).zIndex === '999') e.style.display = 'none';
+    for (const c of document.querySelectorAll('canvas')) if (getComputedStyle(c).zIndex === '3') c.style.display = 'none';
+  });
+  await installGrabber(page, { brightness: 0.42 });
+  // Seated player: put the bench on the table in front of them, then look down at it.
+  const advance = async (sec) => {
+    const n = Math.round(sec * FPS);
+    for (let i = 0; i < n; i++) {
+      await ev(async (dt) => {
+        window.__hcClock.time += dt;
+        window.__hcClock.dt = dt;
+        await new Promise((r) => requestAnimationFrame(() => r()));
+      }, 1 / FPS);
+    }
+  };
+  await ev(() => {
+    window.handcast.setHead([0, 1.2, 0], 0, 0);
+    window.handcast.iwerHand('left', null);
+    window.handcast.iwerHand('right', null);
+  });
+  await advance(0.4);
+  await ev(() => window.handcast.placeInFront(0.75));
+  await advance(0.2);
+  LEVELS = await ev(() => window.handcast.levels());
+  await ev(() => window.handcast.audioLogStart());
+  AUDIO_T0 = await ev(() => window.__hcClock.time);
+}
+
+/** Joins 16-bit PCM WAVs (same format), each trimmed or padded to `seconds[i]`. */
+function joinWavs(wavs, seconds) {
+  const fmt = wavs[0].subarray(0, 44);
+  const ch = fmt.readUInt16LE(22);
+  const rate = fmt.readUInt32LE(24);
+  const parts = wavs.map((w, i) => {
+    const want = Math.round(seconds[i] * rate) * ch * 2;
+    const data = w.subarray(44, 44 + want);
+    return data.length === want ? data : Buffer.concat([data, Buffer.alloc(want - data.length)]);
+  });
+  const body = Buffer.concat(parts);
+  const head = Buffer.from(fmt);
+  head.writeUInt32LE(36 + body.length, 4);
+  head.writeUInt32LE(body.length, 40);
+  return Buffer.concat([head, body]);
+}
 
 // ------------------------------------------------------------------ timeline
 
@@ -463,21 +490,47 @@ const scenes = [
   },
 ];
 
-for (const [i, scene] of scenes.entries()) {
-  if (ONLY && !ONLY.includes(i)) continue;
-  Object.assign(state.head, { ...HEAD, pos: [...HEAD.pos] });
-  hide('left');
-  hide('right');
-  await scene();
-  const s = await st();
-  const sounds = await ev(() => window.handcast.audioEvents());
-  const plucks = sounds.filter((n) => n === 'voice:pluck').length;
-  console.log(`scene ${i}: ${s.level} index=${s.index} solved=${s.solved} casts=${s.casts} plucks(total)=${plucks} status="${s.status}"`);
+const wavs = [];
+const wavSeconds = [];
+for (const group of SESSIONS) {
+  const run = group.filter((i) => !ONLY || ONLY.includes(i));
+  if (!run.length) continue;
+  for (let attempt = 0; ; attempt++) {
+    const f0 = frame;
+    const c0 = captions.length;
+    try {
+      await openSession();
+      for (const i of run) {
+        Object.assign(state.head, { ...HEAD, pos: [...HEAD.pos] });
+        hide('left');
+        hide('right');
+        await scenes[i]();
+        const s = await st();
+        const sounds = await ev(() => window.handcast.audioEvents());
+        const plucks = sounds.filter((n) => n === 'voice:pluck').length;
+        console.log(`scene ${i}: ${s.level} index=${s.index} solved=${s.solved} casts=${s.casts} plucks(session)=${plucks} status="${s.status}"`);
+      }
+      const secs = (frame - f0) / FPS;
+      const wav = await ev(([t0, sec]) => window.handcast.audioRender(t0, sec + 0.5), [AUDIO_T0, secs]);
+      wavs.push(Buffer.from(wav, 'base64'));
+      wavSeconds.push(secs);
+      if (logs.length) console.log('page errors:\n' + logs.slice(0, 10).join('\n'));
+      await browser.close();
+      break;
+    } catch (e) {
+      console.log(`session [${group}] failed (${e.message.split('\n')[0]}); ${attempt ? 'giving up' : 'retrying'}`);
+      frame = f0;
+      captions.length = c0;
+      try {
+        await browser?.close();
+      } catch {
+        // already gone
+      }
+      if (attempt) throw e;
+    }
+  }
 }
 
 writeFileSync(`${OUT}/captions.json`, JSON.stringify({ fps: FPS, seconds: seconds(), captions }, null, 1));
-const wav = await ev(([t0, s]) => window.handcast.audioRender(t0, s + 1), [AUDIO_T0, seconds()]);
-writeFileSync(`${OUT}/audio.wav`, Buffer.from(wav, 'base64'));
+writeFileSync(`${OUT}/audio.wav`, joinWavs(wavs, wavSeconds));
 console.log(`done: ${frame} frames, ${seconds().toFixed(1)}s, wall ${((Date.now() - started) / 1000).toFixed(0)}s`);
-if (logs.length) console.log('page errors:\n' + logs.slice(0, 10).join('\n'));
-await browser.close();

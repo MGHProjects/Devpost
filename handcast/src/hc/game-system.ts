@@ -1626,6 +1626,13 @@ export class HandcastSystem extends createSystem({}) {
         })),
       }),
       levels: () => this.source.levels().map((l) => l.id),
+      /** Live optic of a hand plus whether casting is armed (debugging). */
+      liveOptic: (i = 1) => {
+        const l = this.live[i];
+        const o = l?.optic;
+        if (!o) return null;
+        return { mode: o.mode, center: o.center, mirror: o.mirror ?? null, armed: this.isLit(o), lock: l.lockFoot, segs: this.display?.segments.map((g) => [g.a, g.b]) };
+      },
       load: (i: number) => {
         this.toPlay();
         this.loadIndex(i);
