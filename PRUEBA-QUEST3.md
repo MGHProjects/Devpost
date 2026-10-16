@@ -30,11 +30,20 @@ final.
 
 Ve anotando lo que pase en cada paso. Frases cortas bastan.
 
-1. **Mesa.** Al entrar, apoya una mano plana sobre la mesa y quédate quieto.
+1. **Mesa.** Al entrar, el navegador puede pedir un permiso **Espacial**
+   (para ver la mesa): acéptalo. Mira la mesa sin hacer nada durante unos
+   segundos.
+   - ¿Aparece una mano de cristal fantasma "apretando" **sobre tu mesa real**,
+     o flota en el aire?
+   - Ahora apoya tu mano plana donde está la fantasma y quédate quieto: tu mano
+     debería brillar como cristal fundido y el banco salir de debajo de tu
+     palma con unas notas ascendentes. ¿Pasa así?
    - ¿Cuántos segundos tarda en aparecer el banco?
    - ¿El banco queda pegado a la mesa? Toca la mesa con la punta de un dedo:
      ¿el dedo llega a la superficie del banco, o queda por encima o por debajo?
      ¿Cuántos centímetros, más o menos?
+   - (Opcional, en la segunda mesa) Repite sin apoyar la mano: a los ~10 s el
+     banco debería aparecer solo sobre la mesa. ¿Lo hace?
 2. **Tu mano delante de la luz.** Pon la mano sobre el banco.
    - ¿Ves tu mano real **encima** del banco oscuro y de la luz, o el banco
      se pinta encima de tu mano?
@@ -62,23 +71,28 @@ Ve anotando lo que pase en cada paso. Frases cortas bastan.
    - ¿Notas tirones o la imagen se mueve a saltos?
 8. **Studio.** Menu > Studio: haz un tablero rápido (cuela una mano, añade
    cristales, Publish).
-9. **Salir.** Sal de la sesión inmersiva (botón Meta y la opción de salir del modo inmersivo). En la página 2D
+9. **Panel.** ¿Lees bien el panel oscuro (título, frase, botones) sin forzar
+   la vista? ¿Y los números del Menu? Activa Menu > **Large text** y dime si
+   mejora o si algo se sale del panel.
+10. **Salir.** Sal de la sesión inmersiva (botón Meta y la opción de salir del modo inmersivo). En la página 2D
    aparecerá el **informe de rendimiento**. Pulsa **Copy report** y pégamelo
    en el chat. Si copiar no funciona, hazle una foto o captura.
-10. **Segunda mesa (10 min).** Repite los pasos 1 a 3 en otra mesa distinta
+11. **Segunda mesa (10 min).** Repite los pasos 1 a 3 en otra mesa distinta
     (otra altura u otro color). Saca y pégame también ese informe.
 
 ## 4. Qué enviarme
 
 - Los dos informes (texto copiado o foto).
 - Respuestas cortas a:
-  1. ¿Tu mano real se ve delante del banco y de la luz?
-  2. ¿El banco queda a ras de la mesa? (± cuántos cm)
-  3. ¿Cristales sin querer o que no salían? ¿En qué tablero?
-  4. ¿Algún dedo mal leído? ¿Cuál y en qué gesto?
-  5. ¿La palma izquierda hacia arriba abrió el menú del sistema?
-  6. ¿Volver del menú del sistema mantuvo la partida?
-  7. ¿La grabación del visor capturó passthrough, juego y sonido?
+  1. ¿La mano fantasma apareció sobre tu mesa real? ¿Hubo que aceptar un permiso?
+  2. ¿Tu mano real se ve delante del banco y de la luz?
+  3. ¿El banco queda a ras de la mesa? (± cuántos cm)
+  4. ¿Cristales sin querer o que no salían? ¿En qué tablero?
+  5. ¿Algún dedo mal leído? ¿Cuál y en qué gesto?
+  6. ¿La palma izquierda hacia arriba abrió el menú del sistema?
+  7. ¿Volver del menú del sistema mantuvo la partida?
+  8. ¿La grabación del visor capturó passthrough, juego y sonido?
+  9. ¿Se lee bien el panel y el Menu? ¿Y con Large text?
 - Si puedes, un clip corto del momento en que la mano se convierte en cristal.
 
 ## Si algo va mal
