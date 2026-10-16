@@ -82,6 +82,8 @@ export default async function run({ page, frame }) {
   await wait(500);
   st = await hc(() => window.handcast.state());
   check('fist knock shatters the glass hand', st.casts === 0, `casts=${st.casts}`);
+  const after = (await hc(() => window.handcast.state())).status;
+  check('a broken chord no longer reads as solved', !/Tap Next|sings|Campaign complete/.test(after), after);
   await hc(() => window.handcast.iwerHand('right', null));
 
   // 5. Board 2 ("One"): an open hand wakes a hush stone and does not cast; the point solves it.

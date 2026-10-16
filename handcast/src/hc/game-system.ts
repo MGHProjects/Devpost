@@ -141,6 +141,8 @@ export class HandcastSystem extends createSystem({}) {
   private beams: BeamRenderer2D | null = null;
   private table = new TableAnchor();
   private frameRate = new FrameRateGovernor();
+  /** The status line shown on the last solve, replaced if the chord breaks. */
+  private solvedStatus = '';
 
   private mode: Mode = 'play';
   private level!: LevelDef;
@@ -551,10 +553,7 @@ export class HandcastSystem extends createSystem({}) {
     this.audio.voice('shatter', this.benchPos(c.view.root.position, this.v1));
     for (const l of this.live) if (l.grab?.cast === c) l.grab = null;
     this.hud.setBudget(this.castsLeft(), this.level.budget);
-    if (this.solved) {
-      this.solved = false;
-      this.hud.setSolved(false, this.hasNext());
-    }
+    if (this.solved) this.unsolve();
     if (this.mode === 'studio' && !this.restoring) this.studioCommit();
   }
 
@@ -645,9 +644,16 @@ export class HandcastSystem extends createSystem({}) {
     for (const l of this.live) if (l.grab) return;
     const within = this.mode === 'studio' || this.casts.length <= this.level.budget;
     if (this.castsResult!.solved && !this.solved && within && this.level.crystals.length) this.onSolved();
-    else if (this.solved && !this.castsResult!.solved) {
-      this.solved = false;
-      if (this.mode !== 'studio') this.hud.setSolved(false, this.hasNext());
+    else if (this.solved && !this.castsResult!.solved) this.unsolve();
+  }
+
+  /** The chord broke (a glass hand knocked over or moved): say so, not "solved". */
+  private unsolve(): void {
+    this.solved = false;
+    if (this.mode === 'studio' || this.mode === 'demo') return;
+    this.hud.setSolved(false, this.hasNext());
+    if (this.hud.status === this.solvedStatus) {
+      this.setStatus(this.castsLeft() > 0 ? 'The chord broke. Cast or move a glass hand to light every crystal again.' : 'The chord broke. Move a glass hand, or knock one with your fist to cast again.');
     }
   }
 
@@ -665,7 +671,7 @@ export class HandcastSystem extends createSystem({}) {
     // The Studio keeps the edit's own status line; the attract demo is not play.
     if (this.mode === 'studio' || this.mode === 'demo') return;
     this.hud.setSolved(true, this.hasNext(), this.levelIndex === SLOT.hall);
-    this.setStatus(this.solvedLine());
+    this.setStatus((this.solvedStatus = this.solvedLine()));
     if (this.solvedOnce) return;
     this.solvedOnce = true;
     if (this.levelIndex >= 0 && !this.progress.solved.includes(this.level.id)) this.progress.solved.push(this.level.id);
