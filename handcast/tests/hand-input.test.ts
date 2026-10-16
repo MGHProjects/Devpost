@@ -7,7 +7,7 @@ import {
   curledCount, fistClosed, fingerStraightness, HoldTimer, isKnock, palmUp, pinchGrabs, pluckCrossing, twistAngle,
   unwrapAngle,
 } from '../src/input/gestures';
-import { HandTracker25, HISTORY_FRAMES } from '../src/input/hand-tracker';
+import { HandTracker25, HISTORY_FRAMES, LOSS_GRACE } from '../src/input/hand-tracker';
 import { OneEuroFilter3 } from '../src/input/one-euro';
 import { StillnessDetector } from '../src/input/stillness';
 
@@ -438,6 +438,26 @@ describe('HandTracker25', () => {
     expect(tr.right.pinch.ended).toBe(true);
     tr.update(mockFrame([], undefined), REF, IDENTITY, IDENTITY, DT);
     expect(tr.right.pinch.ended).toBe(false);
+  });
+
+  it('keeps a hold through a one-frame tracking glitch, but not through a real loss', () => {
+    const { pos, rot } = flatHand();
+    const mh = new MockHand();
+    mh.setPose(pos, rot);
+    const tr = new HandTracker25();
+    const seen = mockFrame([mockSource('right', mh)], undefined);
+    const gone = mockFrame([], undefined);
+    for (let i = 0; i < 60; i++) tr.update(seen, REF, IDENTITY, IDENTITY, DT);
+    expect(tr.right.stillness.still).toBe(true);
+    tr.update(gone, REF, IDENTITY, IDENTITY, DT);
+    expect(tr.right.tracked).toBe(false);
+    tr.update(seen, REF, IDENTITY, IDENTITY, DT);
+    expect(tr.right.tracked).toBe(true);
+    expect(tr.right.stillness.still).toBe(true);
+    // Lost for longer than the grace: the hold starts over.
+    for (let t = 0; t <= LOSS_GRACE + DT; t += DT) tr.update(gone, REF, IDENTITY, IDENTITY, DT);
+    tr.update(seen, REF, IDENTITY, IDENTITY, DT);
+    expect(tr.right.stillness.still).toBe(false);
   });
 
   it('takes the first source when the same hand appears twice', () => {

@@ -76,6 +76,7 @@ const state = {
   right: { mode: 'hidden' },
 };
 let frame = 0;
+let lastTrace = '';
 const captions = [];
 const started = Date.now();
 const seconds = () => frame / FPS;
@@ -103,6 +104,15 @@ async function step() {
     { s: state, dt: 1 / FPS, pitch, yaw },
   );
   writeFileSync(`${OUT}/frames/${String(frame).padStart(5, '0')}.jpg`, Buffer.from(data, 'base64'));
+  if (process.env.TRACE) {
+    const s = await ev(() => {
+      const st = window.handcast.state();
+      const r = st.live[1];
+      return `casts=${st.casts} solved=${st.solved} cr=${(st.crystals ?? []).join('')} hush=${(st.hush ?? []).map(Number).join('')} R:${r.tracked ? 't' : '-'}${r.mode ?? 'x'} p=${r.progress.toFixed(2)} still=${r.still}`;
+    });
+    if (s !== lastTrace) console.log(`[${(frame / FPS).toFixed(2)}] ${s}`);
+    lastTrace = s;
+  }
   frame++;
   if (frame % 48 === 0) {
     const el = (Date.now() - started) / 1000;
@@ -210,7 +220,9 @@ async function load(id) {
   const i = LEVELS.indexOf(id);
   if (i < 0) throw new Error(`no level ${id}`);
   await ev((i) => window.handcast.load(i), i);
-  return ev(() => window.handcast.solutionParams());
+  // Every field explicit: a tween toward a solution must not inherit, say, the
+  // spread of the open hand it starts from.
+  return ((await ev(() => window.handcast.solutionParams())) ?? []).map(full);
 }
 
 /** Where a hand hovers before descending onto `p` (out toward the player and to its side). */

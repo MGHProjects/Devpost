@@ -6,6 +6,7 @@
  */
 import { castToPose } from './codec';
 import { computeOptic, type FeatureState } from './hand-features';
+import { FINGER_CHAINS, KNUCKLE, TIP } from './joints';
 import { traceLevel } from './trace2d';
 import type { CastData, HandPose, LevelDef, TraceResult, V2 } from './types';
 
@@ -18,10 +19,31 @@ export function extendedFingers(pose: HandPose): boolean[] {
   return state.extended;
 }
 
-/** The middle finger is the only extended long finger (thumb either way), in any orientation. */
+/** Knuckle-to-tip distance over the finger's length (1 straight .. ~0.4 fully curled). */
+function reach(P: ArrayLike<number>, f: number): number {
+  const chain = FINGER_CHAINS[f];
+  const k = KNUCKLE[f];
+  let L = 0;
+  for (let i = chain.indexOf(k); i < chain.length - 1; i++) {
+    const a = chain[i] * 3;
+    const b = chain[i + 1] * 3;
+    L += Math.hypot(P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]);
+  }
+  const t = TIP[f] * 3;
+  const kk = k * 3;
+  return L > 1e-9 ? Math.hypot(P[t] - P[kk], P[t + 1] - P[kk + 1], P[t + 2] - P[kk + 2]) / L : 1;
+}
+
+/**
+ * The middle finger is the only long finger out (thumb either way), in any
+ * orientation: as the optics see it, or geometrically (a slightly bent middle
+ * finger the optics would call closed still reads as the gesture).
+ */
 export function isOffensiveCast(pose: HandPose): boolean {
   const e = extendedFingers(pose);
-  return e[2] && !e[1] && !e[3] && !e[4];
+  if (e[2] && !e[1] && !e[3] && !e[4]) return true;
+  const P = pose.pos;
+  return reach(P, 2) > 0.72 && reach(P, 1) < 0.62 && reach(P, 3) < 0.62 && reach(P, 4) < 0.62;
 }
 
 // ------------------------------------------------------------------ limits
@@ -153,7 +175,25 @@ export function verifySolution(level: LevelDef, casts: CastData[]): CheckResult 
     }),
   );
   const result = traceLevel(level, optics);
-  return result.solved ? { ok: true, result } : { ok: false, reason: 'does not solve the board', result };
+  if (!result.solved) return { ok: false, reason: 'does not solve the board', result };
+  // Every hand must take part: no decorative casts riding along with a solution.
+  for (let i = 0; i < optics.length && optics.length > 1; i++) {
+    if (traceLevel(level, optics.filter((_, j) => j !== i)).solved) return { ok: false, reason: 'a hand that plays no part', result };
+  }
+  return { ok: true, result };
+}
+
+/** Drops glass hands the solve does not need (greedy, last first), e.g. before reporting a solve. */
+export function pruneIdleCasts(level: LevelDef, casts: CastData[]): CastData[] {
+  const optics = casts.map((cast, i) => computeOptic(castToPose(cast), { id: `cast-${i}`, live: false }));
+  const keep = casts.map(() => true);
+  if (!traceLevel(level, optics).solved) return casts.slice();
+  for (let i = casts.length - 1; i >= 0; i--) {
+    if (keep.filter(Boolean).length <= 1) break;
+    keep[i] = false;
+    if (!traceLevel(level, optics.filter((_, j) => keep[j])).solved) keep[i] = true;
+  }
+  return casts.filter((_, i) => keep[i]);
 }
 
 // ------------------------------------------------------------------ fingerprint

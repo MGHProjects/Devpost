@@ -521,6 +521,14 @@ export function validateBoard(level: ContentLevel, opts: ValidateOptions = {}): 
   const empty = traceLevel(level, []);
   if (empty.solved) reasons.push('solved with no casts');
   if (empty.crystals.some((c) => c.received)) reasons.push('a crystal is lit with no casts');
+  // Every hand must matter, with and without aim assist: a relay board must
+  // not be solved by one of its hands alone.
+  if (casts.length > 1) {
+    for (let i = 0; i < optics.length; i++) {
+      const rest = optics.filter((_, j) => j !== i);
+      if (traceLevel(level, rest).solved || traceLevel(level, rest, { assist: 0 }).solved) reasons.push(`cast ${i} plays no part`);
+    }
+  }
 
   const params = level.solutionParams;
   if (params) {

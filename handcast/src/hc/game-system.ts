@@ -29,7 +29,8 @@ import {
 import { AudioEngine, encodeWav } from '../audio/engine.js';
 import { HallClient, HallEntry } from '../community/client.js';
 import { decodeLevel, parseShareHash } from '../core/codec.js';
-import { EDITOR, poseToCastData } from '../core/editor.js';
+import { castDataToPose, EDITOR, poseToCastData } from '../core/editor.js';
+import { checkLevelPublishable, pruneIdleCasts, sanitizeForPublish } from '../core/moderation.js';
 import { computeOptic, FeatureState } from '../core/hand-features.js';
 import { benchToWorld, iwerPoseFromWorld, IWER_REGISTER_POSE_JS } from '../core/iwer-pose.js';
 import { fkPose, PoseParams } from '../core/fk-hand.js';
@@ -41,7 +42,7 @@ import { traceLevel } from '../core/trace2d.js';
 import { HandOptic, HandPose, LevelDef, TraceResult, V2 } from '../core/types.js';
 import { TableAnchor } from '../input/anchor.js';
 import { isKnock, pinchGrabs, pluckCrossing, twistAngle, unwrapAngle, GESTURE } from '../input/gestures.js';
-import { HandTracker25, TrackedHand } from '../input/hand-tracker.js';
+import { HandTracker25, LOSS_GRACE, TrackedHand } from '../input/hand-tracker.js';
 import { Ambience } from '../render/bench/ambience.js';
 import { BeamRenderer2D } from '../render/bench/beams2d.js';
 import { BenchView } from '../render/bench/bench-view.js';
@@ -99,6 +100,10 @@ interface Live {
   lastKnock: number;
   /** A studio placement pinch is in progress on this hand. */
   studioPinch: boolean;
+  /** Seconds since tracking was lost (0 while tracked). */
+  lostFor: number;
+  /** Casting progress last sent to the molten 'heat' voice. */
+  heatSent: number;
 }
 
 type HallTab = 'featured' | 'new' | 'top';
@@ -168,6 +173,15 @@ export class HandcastSystem extends createSystem({}) {
   private backdrop = new ThreeColor(0x07090f);
 
   private live: Live[] = [];
+  // retrace scratch (reused every frame)
+  private castOptics: HandOptic[] = [];
+  private allOptics: HandOptic[] = [];
+  private committed: boolean[] = [];
+  /** Persistent solve effects (progress, Daily, Hall report, reveal) already ran for this board load. */
+  private solvedOnce = false;
+  private lastSolveFx = -10;
+  private restoreDone = false;
+  private hallPickSeq = 0;
   /** Game-clock timers (so scripted captures with a virtual clock stay in sync). */
   private timers: { at: number; fn: () => void }[] = [];
 
@@ -205,6 +219,8 @@ export class HandcastSystem extends createSystem({}) {
         sizzle: false,
         lastKnock: -10,
         studioPinch: false,
+        lostFor: 0,
+        heatSent: 0,
       });
     }
 
@@ -361,11 +377,12 @@ export class HandcastSystem extends createSystem({}) {
     return first >= 0 ? first : 0;
   }
 
-  private loadIndex(i: number): void {
+  private loadIndex(i: number, remember = true): void {
     const levels = this.source.levels();
     const idx = Math.max(0, Math.min(levels.length - 1, i));
     this.levelIndex = idx;
     this.loadLevel(levels[idx]);
+    if (!remember) return;
     this.progress.current = levels[idx].id;
     saveProgress(this.progress);
   }
@@ -379,7 +396,9 @@ export class HandcastSystem extends createSystem({}) {
     this.clearBoard();
     this.level = level;
     this.solved = false;
+    this.solvedOnce = false;
     this.castsDirty = true;
+    this.committed.length = 0;
     this.prevCrystal = level.crystals.map(() => 'off');
     this.prevHush = level.hush.map(() => false);
     this.gazeSung.clear();
@@ -395,9 +414,13 @@ export class HandcastSystem extends createSystem({}) {
     this.hud.setSolved(false, this.hasNext());
     this.hud.setLike(this.hall.hasLiked(level.id) ? 'Liked' : 'Like');
     this.hud.setBudget(level.budget, level.budget);
-    this.hud.show(this.mode === 'studio' ? 'studio' : 'play');
+    this.hud.setMeter(level.crystals.map(() => null));
+    // The attract demo swaps boards by itself: leave an open Menu / Hall panel alone.
+    const browsing = this.hud.section === 'menu' || this.hud.section === 'hall';
+    if (!(this.mode === 'demo' && browsing)) this.hud.show(this.mode === 'studio' ? 'studio' : 'play');
     this.audio.setAmbient(this.source.tonic(level, this.levelIndex));
-    if (this.mode === 'demo') this.demoT = 0;
+    this.demoT = 0;
+    this.demoStep = 0;
   }
 
   private defaultHint(): string {
@@ -513,41 +536,57 @@ export class HandcastSystem extends createSystem({}) {
 
   private retrace(): void {
     if (!this.bench || !this.beams) return;
-    const castOptics = this.casts.map((c) => c.optic);
+    const castOptics = this.castOptics;
+    castOptics.length = 0;
+    for (const c of this.casts) castOptics.push(c.optic);
     if (this.castsDirty) {
       this.castsResult = traceLevel(this.level, castOptics);
       this.castsDirty = false;
     }
-    const lives: HandOptic[] = [];
-    for (const l of this.live) if (l.optic) lives.push(l.optic);
-    const display = (this.display = lives.length ? traceLevel(this.level, [...castOptics, ...lives]) : this.castsResult!);
+    const all = this.allOptics;
+    all.length = 0;
+    for (const o of castOptics) all.push(o);
+    let lives = 0;
+    for (const l of this.live) {
+      if (!l.optic) continue;
+      all.push(l.optic);
+      lives++;
+    }
+    const display = (this.display = lives ? traceLevel(this.level, all) : this.castsResult!);
     this.beams.setSegments(display.segments);
 
-    const meter: (string | null)[] = [];
-    display.crystals.forEach((c, i) => {
-      this.bench!.setCrystal(i, c.state, c.received);
+    let meterDirty = this.committed.length !== display.crystals.length;
+    for (let i = 0; i < display.crystals.length; i++) {
+      const c = display.crystals[i];
+      this.bench.setCrystal(i, c.state, c.received);
       const was = this.prevCrystal[i];
-      const pos = this.benchPos(this.bench!.worldOf('crystal', i, this.v1), this.v1);
       const note = this.notes[i];
-      if (c.state === 'lit' && was !== 'lit') this.audio.bell(note, pos, 0.75);
-      const committed = this.castsResult!.crystals[i].state === 'lit';
-      if (committed) this.audio.startSustain(i, note, pos);
-      else this.audio.stopSustain(i);
+      if (c.state === 'lit' && was !== 'lit') this.audio.bell(note, this.benchPos(this.bench.worldOf('crystal', i, this.v1), this.v1), 0.75);
       this.prevCrystal[i] = c.state;
-      meter.push(committed ? `#${lightColor(this.level.crystals[i].color).getHexString()}` : null);
-    });
-    display.hush.forEach((h, i) => {
-      this.bench!.setHush(i, h.awake);
-      if (h.awake && !this.prevHush[i]) {
-        this.audio.voice('hushWake', this.benchPos(this.bench!.worldOf('hush', i, this.v1), this.v1));
+      const committed = this.castsResult!.crystals[i].state === 'lit';
+      if (committed !== this.committed[i]) {
+        this.committed[i] = committed;
+        meterDirty = true;
+        if (committed) this.audio.startSustain(i, note, this.benchPos(this.bench.worldOf('crystal', i, this.v1), this.v1));
+        else this.audio.stopSustain(i);
       }
-      this.prevHush[i] = h.awake;
-    });
-    this.hud.setMeter(meter);
+    }
+    if (meterDirty) {
+      this.committed.length = display.crystals.length;
+      this.hud.setMeter(this.committed.map((on, i) => (on ? `#${lightColor(this.level.crystals[i].color).getHexString()}` : null)));
+    }
+    for (let i = 0; i < display.hush.length; i++) {
+      const awake = display.hush[i].awake;
+      this.bench.setHush(i, awake);
+      if (awake && !this.prevHush[i]) {
+        this.audio.voice('hushWake', this.benchPos(this.bench.worldOf('hush', i, this.v1), this.v1));
+      }
+      this.prevHush[i] = awake;
+    }
 
     // Light inside glass: each finger glows with what it carries.
     for (const c of this.casts) {
-      const io = display.hands.find((h) => h.id === c.optic.id);
+      const io = handIO(display, c.optic.id);
       let carried = 0;
       for (let f = 0; f < 5; f++) {
         const m = io ? io.outMask[f] | io.inMask[f] : 0;
@@ -563,13 +602,16 @@ export class HandcastSystem extends createSystem({}) {
     }
     for (const l of this.live) {
       if (!l.coat || !l.optic) continue;
-      const io = display.hands.find((h) => h.id === l.optic!.id);
+      const io = handIO(display, l.optic.id);
       for (let f = 0; f < 5; f++) {
         const m = io ? io.outMask[f] | io.inMask[f] : 0;
         l.coat.setFingerLight(f, m ? lightColor(m) : null);
       }
     }
 
+    // While a glass hand is held, wait for the release: dragging through a
+    // solving position must not fire the solve (and its side effects) repeatedly.
+    for (const l of this.live) if (l.grab) return;
     const within = this.mode === 'studio' || this.casts.length <= this.level.budget;
     if (this.castsResult!.solved && !this.solved && within && this.level.crystals.length) this.onSolved();
     else if (this.solved && !this.castsResult!.solved) {
@@ -580,20 +622,24 @@ export class HandcastSystem extends createSystem({}) {
 
   private onSolved(): void {
     this.solved = true;
-    this.bench!.pulseSolved();
-    this.boost = 1;
-    const center = this.benchRoot.getWorldPosition(this.v2);
-    const sorted = [...this.notes].sort((a, b) => a - b);
-    this.audio.resolve(sorted, this.source.bass(this.level, this.levelIndex), center, 0.25);
-    if (this.mode === 'studio') {
-      this.setStatus('Your board sings. Publish it, or keep shaping it.');
-      return;
+    // The flourish (pulse + resolving chord) at most every couple of seconds.
+    if (this.time - this.lastSolveFx > 2) {
+      this.lastSolveFx = this.time;
+      this.bench!.pulseSolved();
+      this.boost = 1;
+      const center = this.benchRoot.getWorldPosition(this.v2);
+      const sorted = [...this.notes].sort((a, b) => a - b);
+      this.audio.resolve(sorted, this.source.bass(this.level, this.levelIndex), center, 0.25);
     }
+    // The Studio keeps the edit's own status line; the attract demo is not play.
+    if (this.mode === 'studio' || this.mode === 'demo') return;
+    this.hud.setSolved(true, this.hasNext(), this.levelIndex === SLOT.hall);
+    this.setStatus(this.solvedLine());
+    if (this.solvedOnce) return;
+    this.solvedOnce = true;
     if (this.levelIndex >= 0 && !this.progress.solved.includes(this.level.id)) this.progress.solved.push(this.level.id);
     if (this.levelIndex === SLOT.daily) this.recordDaily();
     saveProgress(this.progress);
-    this.hud.setSolved(true, this.hasNext(), this.levelIndex === SLOT.hall);
-    this.setStatus(this.solvedLine());
     if (this.levelIndex === SLOT.hall) void this.reportHallSolve();
     // Reveal: the maker's glass hands fade in beside yours.
     const level = this.level;
@@ -611,7 +657,17 @@ export class HandcastSystem extends createSystem({}) {
 
   private reveal(): void {
     if (!this.solved || !this.level.solution) return;
+    this.clearHintGhosts();
     for (const cd of this.level.solution) this.addGhost(castToPose(cd));
+  }
+
+  private clearHintGhosts(): void {
+    for (let i = this.ghosts.length - 1; i >= 0; i--) {
+      const g = this.ghosts[i] as Cast & { hint?: boolean };
+      if (!g.hint) continue;
+      g.view.dispose();
+      this.ghosts.splice(i, 1);
+    }
   }
 
   /** A ghost glass hand, unless a glass or ghost hand already stands there. */
@@ -637,6 +693,7 @@ export class HandcastSystem extends createSystem({}) {
     if (this.solved || !this.level.solution) return;
     const placed = this.casts.length;
     const cd = this.level.solution[Math.min(placed, this.level.solution.length - 1)];
+    this.clearHintGhosts();
     const ghost = this.addCast(castToPose(cd), 'ghost');
     if (ghost) {
       this.hintUntil = this.time + 6;
@@ -698,11 +755,14 @@ export class HandcastSystem extends createSystem({}) {
     this.beams = new BeamRenderer2D();
     bench.root.add(this.beams.group);
     for (const o of keep) bench.root.add(o);
-    this.prevCrystal = level.crystals.map(() => 'off');
-    this.prevHush = level.hush.map(() => false);
+    // Keep what was already lit / awake so an edit does not ring every bell again.
+    const prevC = this.prevCrystal;
+    const prevH = this.prevHush;
+    this.prevCrystal = level.crystals.map((_, i) => prevC[i] ?? 'off');
+    this.prevHush = level.hush.map((_, i) => prevH[i] ?? false);
     this.notes = this.source.notesFor(level, SLOT.studio);
     this.castsDirty = true;
-    this.solved = false;
+    this.committed.length = 0;
     this.audio.stopAllSustains();
     this.publishWarned = false;
   }
@@ -749,7 +809,9 @@ export class HandcastSystem extends createSystem({}) {
   private async studioPublish(): Promise<void> {
     const s = this.studio;
     if (!s) return;
-    const seal = s.seal(this.casts.map((c) => c.pose));
+    // Glass hands the solve does not need are left out of the published board.
+    const kept = pruneIdleCasts(s.level, this.casts.map((c) => poseToCastData(c.pose)));
+    const seal = s.seal(kept.map(castDataToPose));
     if (!seal.ok) {
       this.setStatus(sealMessage(seal));
       return;
@@ -804,6 +866,7 @@ export class HandcastSystem extends createSystem({}) {
         }
         if (best) {
           this.shatterCast(best);
+          this.lockHand(l);
           this.setStatus('Glass hand removed.');
           return;
         }
@@ -818,6 +881,7 @@ export class HandcastSystem extends createSystem({}) {
     if (pin.active) s.moveDrag(p);
     if (pin.ended || !pin.active || !l.hand.tracked) {
       l.studioPinch = false;
+      this.lockHand(l);
       const msg = s.endDrag(this.time);
       if (msg) {
         this.rebuildStudio();
@@ -858,7 +922,11 @@ export class HandcastSystem extends createSystem({}) {
   private async hallPick(i: number): Promise<void> {
     const e = this.hallRows[i];
     if (!e) return;
-    const level = (await this.hall.getLevel(e.code)) ?? (await this.hall.getLevel(e.id));
+    // A slow load must not pull the player out of whatever they went on to do.
+    const seq = ++this.hallPickSeq;
+    const stale = () => seq !== this.hallPickSeq || this.hud.section !== 'hall' || this.mode === 'studio';
+    const level = (await this.hall.getLevel(e.code)) ?? (stale() ? null : await this.hall.getLevel(e.id));
+    if (stale()) return;
     if (!level) {
       this.hud.setHall('That board would not open', this.hallRows.map((r) => ({ name: r.name, meta: '' })));
       return;
@@ -878,19 +946,31 @@ export class HandcastSystem extends createSystem({}) {
     const code = parseShareHash(window.location.hash);
     if (!code || code === this.lastShareCode || !this.templates) return;
     this.lastShareCode = code;
+    let level: LevelDef;
     try {
-      const level = await decodeLevel(code);
-      this.openHallLevel(level, level.id);
-      this.setStatus(`Shared by ${level.author ?? 'a player'}. ${level.hint ?? this.defaultHint()}`);
+      level = await decodeLevel(code);
     } catch {
       this.setStatus('That share link is damaged.');
+      return;
     }
+    // A link is untrusted input: the same limits and moderation as a publish,
+    // and none of its free text (name, author, hint) or its claimed id.
+    const chk = checkLevelPublishable(level);
+    if (!chk.ok || !level.solution) {
+      this.setStatus('That share link does not hold a playable board.');
+      return;
+    }
+    const safe = sanitizeForPublish(level, level.solution, 'shared-link');
+    delete safe.author;
+    this.openHallLevel(safe, safe.id);
+    this.setStatus(`A board shared with you. ${this.defaultHint()}`);
   }
+
 
   private async reportHallSolve(): Promise<void> {
     const level = this.level;
     const id = this.hallEntryId ?? level.id;
-    const stats = await this.hall.submitSolution(id, this.casts.map((c) => poseToCastData(c.pose)));
+    const stats = await this.hall.submitSolution(id, pruneIdleCasts(level, this.casts.map((c) => poseToCastData(c.pose))));
     if (this.level !== level || !this.solved) return;
     const share = Math.round(stats.yourShare * 100);
     this.setStatus(
@@ -939,12 +1019,20 @@ export class HandcastSystem extends createSystem({}) {
       const h = l.hand;
       this.ensureCoat(l);
       if (!h.tracked) {
+        l.lostFor += dt;
+        // A dropped frame or two (common when a palm touches the table) keeps
+        // the hold, the grab and the live optic; only a real loss ends them.
+        if (l.lostFor < LOSS_GRACE) {
+          this.setCasting(l, Math.max(0, l.progress - dt * 0.5));
+          continue;
+        }
         l.optic = null;
-        l.grab = null;
+        if (l.grab) this.releaseGrab(l);
         if (l.studioPinch) this.updateStudioPinch(l, false);
         this.setCasting(l, 0);
         continue;
       }
+      l.lostFor = 0;
       const pc = h.palm.center;
       const near = Math.abs(pc[0]) < hw && Math.abs(pc[2]) < hd && pc[1] < SLAB_HEIGHT && pc[1] > -0.05;
 
@@ -977,8 +1065,12 @@ export class HandcastSystem extends createSystem({}) {
   private isLit(o: HandOptic): boolean {
     const d = this.display;
     if (!d) return false;
-    const io = d.hands.find((h) => h.id === o.id);
-    if (o.mode === 'fan') return !!io && io.inMask.some((m) => m !== 0);
+    const io = handIO(d, o.id);
+    if (o.mode === 'fan') {
+      if (!io) return false;
+      for (let f = 0; f < io.inMask.length; f++) if (io.inMask[f] !== 0) return true;
+      return false;
+    }
     // Mirrors and fists: armed when a beam touches them.
     const [cx, cz] = o.center;
     for (const s of d.segments) {
@@ -988,7 +1080,6 @@ export class HandcastSystem extends createSystem({}) {
   }
 
   private setCasting(l: Live, p: number): void {
-    const was = l.progress;
     l.progress = p;
     if (l.coat) {
       if (p > 0.001) {
@@ -1009,7 +1100,11 @@ export class HandcastSystem extends createSystem({}) {
       l.sizzle = false;
       this.audio.voice('moltenStop', id);
     }
-    if (l.sizzle && Math.abs(p - was) > 0.02) this.audio.voice('moltenHeat', id, p);
+    if (l.sizzle && Math.abs(p - l.heatSent) > 0.04) {
+      l.heatSent = p;
+      this.audio.voice('moltenHeat', id, p);
+    }
+    if (!l.sizzle) l.heatSent = 0;
   }
 
   private commitCast(l: Live): void {
@@ -1042,6 +1137,7 @@ export class HandcastSystem extends createSystem({}) {
       let best: Cast | null = null;
       let bestD: number = GESTURE.grabRadius;
       for (const c of this.casts) {
+        if (this.live.some((o) => o !== l && o.grab?.cast === c)) continue;
         const f = footOf(c.pose);
         const d = Math.hypot(pin.point[0] - f[0], pin.point[2] - f[1]);
         if (d < bestD && pin.point[1] < 0.07 && pinchGrabs(true, pin.point, f, 0)) {
@@ -1073,18 +1169,36 @@ export class HandcastSystem extends createSystem({}) {
       const fz = pin.point[2] + g.grip[1];
       this.moveCast(g.cast, yaw, [fx - g.cast.baseFoot[0], fz - g.cast.baseFoot[1]]);
     }
-    if (pin.ended || !pin.active) {
-      const c = g.cast;
-      c.view.setSelected(false);
-      l.grab = null;
-      const f = footOf(c.pose);
-      const off = Math.abs(f[0]) > this.level.bench.w / 2 + 0.03 || Math.abs(f[1]) > this.level.bench.d / 2 + 0.03;
-      if (off) this.shatterCast(c);
-      else {
-        this.audio.tick('place', this.benchPos(c.view.root.position, this.v1));
-        if (this.mode === 'studio') this.studioCommit();
-      }
+    if (pin.ended || !pin.active) this.releaseGrab(l);
+  }
+
+  /** Lets go of a held glass hand: place it (or shatter it off the bench). */
+  private releaseGrab(l: Live): void {
+    const g = l.grab;
+    if (!g) return;
+    const c = g.cast;
+    c.view.setSelected(false);
+    l.grab = null;
+    this.lockHand(l);
+    const f = footOf(c.pose);
+    const off = Math.abs(f[0]) > this.level.bench.w / 2 + 0.03 || Math.abs(f[1]) > this.level.bench.d / 2 + 0.03;
+    if (off) this.shatterCast(c);
+    else {
+      this.audio.tick('place', this.benchPos(c.view.root.position, this.v1));
+      if (this.mode === 'studio') this.studioCommit();
     }
+  }
+
+  /**
+   * After a grab, a studio placement or an erase the same hand must withdraw
+   * (or leave the light) before it can cast: holding still to admire the
+   * result must not pour a pinch-shaped glass hand.
+   */
+  private lockHand(l: Live): void {
+    const c = l.hand.palm.center;
+    l.lockFoot = [c[0], c[2]];
+    l.hand.stillness.reset();
+    this.setCasting(l, 0);
   }
 
   private updateKnock(l: Live): void {
@@ -1148,10 +1262,20 @@ export class HandcastSystem extends createSystem({}) {
   // ------------------------------------------------------------------ table placement
 
   private enterXR(): void {
-    this.mode = this.mode === 'demo' ? 'play' : this.mode;
+    if (this.mode === 'demo') {
+      // Start the board fresh: the attract demo's glass hands are not the player's.
+      this.mode = 'play';
+      if (this.level) this.loadLevel(this.level);
+    }
     if (this.placed) return;
     this.pendingPlace = true;
-    void this.table.restore(this.world.session).then((found) => {
+    this.restoreDone = false;
+    this.restoreAt = 0;
+    const session = this.world.session;
+    void this.table.restore(session).then((found) => {
+      if (this.world.session !== session) return;
+      this.restoreDone = true;
+      this.restoreAt = this.time;
       if (!found && !this.progress.calibrated) this.startCalibration();
     });
   }
@@ -1159,11 +1283,24 @@ export class HandcastSystem extends createSystem({}) {
   private exitXR(): void {
     this.placed = false;
     this.calibrating = false;
+    this.pendingPlace = false;
     this.table.reset();
+    for (const l of this.live) {
+      if (l.grab) l.grab.cast.view.setSelected(false);
+      l.grab = null;
+      l.studioPinch = false;
+      l.optic = null;
+      l.lockFoot = null;
+      l.lostFor = 0;
+      this.setCasting(l, 0);
+      l.coat?.setVisible(false);
+    }
     const wasStudio = !!this.studio;
     if (wasStudio) this.leaveStudio();
     this.layoutDesktop();
+    // Back on the 2D page: the attract demo replays the board from scratch.
     if (wasStudio) this.loadIndex(this.returnIndex);
+    else if (this.level) this.loadLevel(this.level);
   }
 
   private startCalibration(): void {
@@ -1225,6 +1362,7 @@ export class HandcastSystem extends createSystem({}) {
     this.audio.tick('place');
     const info = this.source.describe(this.level, this.levelIndex);
     this.hud.setBoard(info.eyebrow, this.level.name, this.level.hint ?? this.defaultHint());
+    this.hud.show(this.mode === 'studio' ? 'studio' : 'play');
   }
 
   /** Head-relative fallback placement (no calibration). */
@@ -1297,13 +1435,12 @@ export class HandcastSystem extends createSystem({}) {
         }
       }
     }
-    if (this.pendingPlace && this.time > 0 && this.progress.calibrated && !this.calibrating) {
+    if (this.pendingPlace && this.restoreDone && this.progress.calibrated && !this.calibrating) {
       // Calibrated before but no anchor came back within a moment: place in front.
-      this.pendingTimer += 1;
-      if (this.pendingTimer > 90) this.placeInFront();
+      if (this.time - this.restoreAt > 1.0) this.placeInFront();
     }
   }
-  private pendingTimer = 0;
+  private restoreAt = 0;
 
   // ------------------------------------------------------------------ demo (desktop attract mode)
 
@@ -1324,7 +1461,7 @@ export class HandcastSystem extends createSystem({}) {
       this.demoStep = 0;
       this.demoT = 0;
       const levels = this.source.levels();
-      if (this.levelIndex >= 0) this.loadIndex((this.levelIndex + 1) % Math.min(levels.length, 8));
+      if (this.levelIndex >= 0) this.loadIndex((this.levelIndex + 1) % Math.min(levels.length, 8), false);
       else this.loadLevel(this.level);
       this.mode = 'demo';
     }
@@ -1656,6 +1793,13 @@ export class HandcastSystem extends createSystem({}) {
     };
     (window as unknown as { handcast: typeof api }).handcast = api;
   }
+}
+
+/** The trace result entry for a hand optic (indexed loop: no closure per frame). */
+function handIO(tr: TraceResult, id: string): TraceResult['hands'][number] | null {
+  const hands = tr.hands;
+  for (let i = 0; i < hands.length; i++) if (hands[i].id === id) return hands[i];
+  return null;
 }
 
 function colourWords(mask: number): string {

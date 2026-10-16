@@ -61,7 +61,20 @@ def card(lines, path, beams=True):
     img.save(path, quality=95)
 
 
-card(
+BRAND = Path(__file__).resolve().parents[2] / 'media' / 'brand'
+
+
+def brand_card(name, path):
+    """Uses the rendered brand card (scripts/brand/make_logo.py) when it exists."""
+    src = BRAND / name
+    if not src.exists():
+        return False
+    Image.open(src).convert('RGB').resize((W, H), Image.LANCZOS).save(path, quality=95)
+    return True
+
+
+if not brand_card('card-title.png', D / 'title.jpg'):
+  card(
     [
         ('HANDCAST', 'Bold', 72, (245, 245, 250)),
         ('Your hand, frozen into glass, is the only optic.', 'Medium', 30, (200, 205, 220)),
@@ -76,7 +89,8 @@ end_lines = [
 ]
 if URL:
     end_lines.append(('Play on Meta Quest: ' + URL, 'SemiBold', 24, (143, 166, 255)))
-card(end_lines, D / 'end.jpg')
+if not brand_card('card-end.png', D / 'end.jpg'):
+    card(end_lines, D / 'end.jpg')
 
 # Captions as ASS so libass handles wrapping and the translucent box.
 def ts(t):

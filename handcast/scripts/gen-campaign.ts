@@ -5,7 +5,11 @@
  *   npx vite-node --config vitest.config.ts scripts/gen-campaign.ts [chapterId ...] [daily]
  *
  * With no arguments every chapter is rebuilt (not the Daily); `daily` rebuilds
- * levels/daily.json (one validated board per date, DAILY_FIRST..DAILY_LAST).
+ * levels/daily.json (one validated board per date, DAILY_FIRST..DAILY_LAST);
+ * `fix` keeps every shipped board that still passes validateBoard and
+ * regenerates only the ones that fail (same spec, same id and slot, the
+ * candidate closest in difficulty), so a stricter rule does not reshuffle a
+ * whole chapter.
  *
  * (vite-node ships with vitest; the vitest config keeps the IWSDK dev plugin
  * out of the way.) For each board it tries a fixed list of seeds and keeps up
@@ -14,11 +18,11 @@
  * correlation with the board order) and robustness.
  * Deterministic: the same specs always produce the same JSON.
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generateBoard, type GenResult } from '../src/core/board-gen';
-import { hashString, type ContentLevel } from '../src/core/validate';
+import { hashString, validateBoard, type ContentLevel } from '../src/core/validate';
 import { CHAPTER_SPECS } from '../src/content/campaign-specs';
 import { DAILY_FIRST, DAILY_LAST, generateDaily } from '../src/content/daily';
 
@@ -88,20 +92,54 @@ function choose(cands: Cand[][]): number[] {
   return best;
 }
 
+function candidates(spec: (typeof CHAPTER_SPECS)[number]['boards'][number], chapter: number, index: number): Cand[] {
+  const found: Cand[] = [];
+  for (let k = 0; k < SEEDS && found.length < CANDIDATES; k++) {
+    const seed = (hashString(spec.id) + k * 7919) >>> 0;
+    const r = generateBoard({ ...spec, chapter, index }, seed, { attempts: ATTEMPTS });
+    if (r) found.push({ r, seed });
+  }
+  return found;
+}
+
 const only = process.argv.slice(2);
 mkdirSync(OUT, { recursive: true });
+
+if (only.includes('fix')) {
+  for (const ch of CHAPTER_SPECS) {
+    const file = resolve(OUT, `${ch.id}.json`);
+    const data = JSON.parse(readFileSync(file, 'utf8')) as { id: string; title: string; music: number; levels: ContentLevel[] };
+    const chapter = CHAPTER_SPECS.indexOf(ch);
+    let changed = false;
+    data.levels = data.levels.map((old) => {
+      const v = validateBoard(old);
+      if (v.ok) return old;
+      const specIndex = ch.boards.findIndex((b) => b.id === old.gen?.spec);
+      if (specIndex < 0) throw new Error(`${old.id}: unknown spec ${old.gen?.spec}`);
+      const found = candidates(ch.boards[specIndex], chapter, specIndex);
+      if (!found.length) throw new Error(`${old.id}: no valid board for ${old.gen?.spec}`);
+      const target = old.gen?.difficulty ?? 0;
+      found.sort((a, b) => Math.abs(a.r.result.difficulty - target) - Math.abs(b.r.result.difficulty - target));
+      const { r, seed } = found[0];
+      const L = r.level;
+      L.gen = { spec: old.gen!.spec, seed, difficulty: r.result.difficulty, robustness: r.result.robustness, solveRate: r.result.solveRate };
+      const out = tidy(L);
+      out.id = old.id;
+      out.index = old.index;
+      console.log(`${old.id}: regenerated (${v.reasons.join('; ')}) d ${target.toFixed(3)} -> ${r.result.difficulty.toFixed(3)}`);
+      changed = true;
+      return out;
+    });
+    if (changed) writeFileSync(file, JSON.stringify(data) + '\n');
+  }
+}
 for (const ch of CHAPTER_SPECS) {
   if (only.length && !only.includes(ch.id)) continue;
   const chapter = CHAPTER_SPECS.indexOf(ch);
   const all: Cand[][] = [];
   ch.boards.forEach((spec, index) => {
     const t0 = Date.now();
-    const found: Cand[] = [];
-    for (let k = 0; k < SEEDS && found.length < CANDIDATES; k++) {
-      const seed = (hashString(spec.id) + k * 7919) >>> 0;
-      const r = generateBoard({ ...spec, chapter, index }, seed, { attempts: ATTEMPTS });
-      if (r) found.push({ r, seed });
-    }
+    const found = candidates(spec, chapter, index);
     console.log(`${spec.id}: ${found.length} candidates [${found.map((c) => `${c.r.result.difficulty.toFixed(3)}/${c.r.result.robustness.toFixed(2)}`).join(' ')}] (${Date.now() - t0} ms)`);
     if (!found.length) throw new Error(`${spec.id}: no valid board`);
     all.push(found);

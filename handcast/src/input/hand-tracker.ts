@@ -24,6 +24,12 @@ export const PINCH_ON = 0.018;
 export const PINCH_OFF = 0.032;
 /** Frames kept for snapshot averaging. */
 export const HISTORY_FRAMES = 12;
+/**
+ * Tracking gaps shorter than this (s) are glitches, not a lost hand: on
+ * reacquire the stillness window and pose history carry on, so a hold that
+ * flickers for a frame or two (palms on a table do) is not restarted.
+ */
+export const LOSS_GRACE = 0.25;
 
 const THUMB_TIP = TIP[0];
 const INDEX_TIP = TIP[1];
@@ -92,6 +98,8 @@ export class TrackedHand {
   tracked = false;
   /** Seconds since tracking was (re)acquired. */
   trackedTime = 0;
+  /** Seconds since tracking was lost (while untracked). */
+  lostTime = Infinity;
   /** Raw joint positions / orientations in world space. */
   readonly posWorld = new Float32Array(75);
   readonly rotWorld = new Float32Array(100);
@@ -232,13 +240,16 @@ export class TrackedHand {
     this.pinch.started = false;
     this.pinch.ended = false;
     if (reacquired) {
+      const glitch = this.lostTime < LOSS_GRACE;
       this.trackedTime = 0;
       this.euro.reset(this.rawBench);
       this.posBench.set(this.euro.value);
       this.rotBench.set(this.rawRotBench);
-      this.history.count = 0;
-      this.history.head = 0;
-      this.stillness.reset();
+      if (!glitch) {
+        this.history.count = 0;
+        this.history.head = 0;
+        this.stillness.reset();
+      }
       this.prevRaw.set(this.rawBench);
       this.speed.knuckle.fill(0);
       this.speed.tip.fill(0);
@@ -267,14 +278,17 @@ export class TrackedHand {
   }
 
   /** @internal Tracking lost this frame: keep the last good data, end any pinch. */
-  lose(): void {
+  lose(dt = 0): void {
     this.pinch.started = false;
     this.pinch.ended = this.pinch.active;
-    if (!this.tracked) return;
+    if (!this.tracked) {
+      this.lostTime += dt > 0 ? dt : 0;
+      return;
+    }
     this.tracked = false;
+    this.lostTime = 0;
     this.pinch.active = false;
     this.pinch.strength = 0;
-    this.stillness.reset();
     this.speed.knuckle.fill(0);
     this.speed.tip.fill(0);
     this.speed.knuckleVel.fill(0);
@@ -502,8 +516,8 @@ export class HandTracker25 {
         }
       }
     }
-    if (!gotLeft) this.left.lose();
-    if (!gotRight) this.right.lose();
+    if (!gotLeft) this.left.lose(dt);
+    if (!gotRight) this.right.lose(dt);
   }
 
   private sample(
