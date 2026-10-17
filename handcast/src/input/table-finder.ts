@@ -30,6 +30,13 @@ const MIN_UP = 0.9;
 /** How far ahead of the head (horizontal) the table point may be. */
 const MIN_REACH = 0.15;
 const MAX_REACH = 0.9;
+/** A depth hit counts only after this many agreeing samples (every 4th frame: ~0.3 s). */
+const HIT_STABLE = 6;
+/** ...within this height and position spread (m). */
+const HIT_DY = 0.03;
+const HIT_DXZ = 0.05;
+/** Updates without an agreeing hit before a hit-test guess is dropped (~0.5 s). */
+const HIT_STALE = 9;
 
 function mulPoint(m: ArrayLike<number>, x: number, y: number, z: number, out: V3): V3 {
   out.x = m[0] * x + m[4] * y + m[8] * z + m[12];
@@ -82,6 +89,8 @@ export class TableFinder {
   private session: HitSession | null = null;
   private source: XRHitTestSource | null = null;
   private frames = 0;
+  /** Hit-test candidate being confirmed, and how many samples agree with it. */
+  private cand = { x: 0, y: 0, z: 0, n: 0, stale: 0 };
   private p = { x: 0, y: 0, z: 0 };
   private n = { x: 0, y: 0, z: 0 };
 
@@ -91,6 +100,7 @@ export class TableFinder {
     const s = (this.session = (session as HitSession) ?? null);
     this.best = null;
     this.frames = 0;
+    this.cand.n = 0;
     if (!s?.requestHitTestSource || !s.enabledFeatures?.includes('hit-test')) return;
     void s
       .requestReferenceSpace('viewer')
@@ -140,8 +150,27 @@ export class TableFinder {
       const n = mulDir(toWorld, m[4], m[5], m[6], this.n);
       const reach = Math.hypot(p.x - head.x, p.z - head.z);
       if (n.y > MIN_UP && p.y > MIN_Y && p.y < MAX_Y && p.y < head.y - 0.15 && reach > MIN_REACH && reach < MAX_REACH) {
-        guess = { x: p.x, y: p.y, z: p.z, source: 'hit-test' };
+        // One upward hit could be a lap, a chair seat or a hand: keep it only
+        // once several samples in a row agree.
+        const c = this.cand;
+        if (c.n > 0 && Math.abs(p.y - c.y) < HIT_DY && Math.hypot(p.x - c.x, p.z - c.z) < HIT_DXZ) {
+          c.n++;
+          c.x += (p.x - c.x) * 0.3;
+          c.y += (p.y - c.y) * 0.3;
+          c.z += (p.z - c.z) * 0.3;
+        } else {
+          c.x = p.x;
+          c.y = p.y;
+          c.z = p.z;
+          c.n = 1;
+        }
+        c.stale = 0;
+        if (c.n >= HIT_STABLE) guess = { x: c.x, y: c.y, z: c.z, source: 'hit-test' };
       }
+    }
+    if (!guess && ++this.cand.stale > HIT_STALE) {
+      this.cand.n = 0;
+      if (this.best?.source === 'hit-test') this.best = null;
     }
 
     // 2. A horizontal plane at table height in front of the player (preferred:

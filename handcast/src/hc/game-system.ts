@@ -404,6 +404,9 @@ export class HandcastSystem extends createSystem({}) {
       }),
       recenter: g(() => {
         this.hud.show('play');
+        // A late old anchor must not pull the bench back to the previous table.
+        this.table.reset();
+        this.pendingPlace = false;
         this.startCalibration();
       }),
       tool: (t) => g(() => this.setTool(t))(),
@@ -1205,7 +1208,10 @@ export class HandcastSystem extends createSystem({}) {
       this.updateCalibration(dt);
       return;
     }
-    if (!this.bench) return;
+    if (!this.bench || (this.pendingPlace && !this.placed)) {
+      for (const l of this.live) l.optic = null;
+      return;
+    }
     const hw = this.level.bench.w / 2 + BENCH_MARGIN;
     const hd = this.level.bench.d / 2 + BENCH_MARGIN;
 
@@ -1237,7 +1243,8 @@ export class HandcastSystem extends createSystem({}) {
       this.updatePluck(l, dt);
 
       if (l.lockFoot && (!near || Math.hypot(pc[0] - l.lockFoot[0], pc[2] - l.lockFoot[1]) > WITHDRAW)) l.lockFoot = null;
-      if (this.lockAfterPlace && near) l.lockFoot = [pc[0], pc[2]];
+      // Hands already on the bench when it is placed (or while it pours) must lift off first.
+      if ((this.lockAfterPlace || this.bench.pouring) && near) l.lockFoot = [pc[0], pc[2]];
       const active = near && !l.grab && !l.studioPinch && this.mode !== 'demo' && !this.bench.pouring;
       l.optic = active ? computeOptic(h.toPose(), { id: `live-${h.hand}`, live: true, state: l.feat }) : null;
       if (!active || l.lockFoot) {
@@ -1262,7 +1269,7 @@ export class HandcastSystem extends createSystem({}) {
       }
       if (l.progress >= 1) this.commitCast(l);
     }
-    this.lockAfterPlace = false;
+    if (!this.bench.pouring) this.lockAfterPlace = false;
   }
 
   private isLit(o: HandOptic): boolean {
@@ -1550,11 +1557,17 @@ export class HandcastSystem extends createSystem({}) {
     }
     this.perfEvent('enter');
     if (this.mode === 'demo') {
-      // Start the board fresh: the attract demo's glass hands are not the player's.
+      // Start fresh on the player's board: the attract demo cycles boards on the
+      // 2D page (without remembering them) and its glass hands are not the player's.
       this.mode = 'play';
-      if (this.level) this.loadLevel(this.level);
+      if (this.capture?.tour != null) this.startTour(this.capture.tour);
+      else if (this.levelIndex >= 0) this.loadIndex(this.startIndex(), false);
+      else if (this.level) this.loadLevel(this.level);
     }
     if (this.placed) return;
+    // Until a placement (anchor, set-up or fallback), the bench is not shown at
+    // its 2D-page spot and cannot be played.
+    this.benchRoot.visible = false;
     this.pendingPlace = true;
     this.restoreDone = false;
     this.restoreAt = 0;
@@ -1653,19 +1666,20 @@ export class HandcastSystem extends createSystem({}) {
     this.calibHold = 0;
     for (const l of this.live) {
       this.releaseGrab(l);
+      if (l.studioPinch) this.studio?.cancelDrag();
       l.studioPinch = false;
       l.optic = null;
       l.lockFoot = null;
       l.progress = 0;
       this.setCasting(l, 0);
       l.coat?.setVisible(false);
-      l.hand.stillness.reset();
-      l.hand.lose();
-      l.hand.lose(LOSS_GRACE + 1);
+      l.hand.rebase();
     }
   }
 
   private exitXR(): void {
+    this.fallbackPlaced = false;
+    this.lockAfterPlace = false;
     this.frameRate.end();
     this.saveCaptureAudio();
     this.hud.object.visible = true;
@@ -1715,6 +1729,7 @@ export class HandcastSystem extends createSystem({}) {
   private startCalibration(): void {
     if (!this.world.renderer.xr.isPresenting) return;
     this.calibrating = true;
+    this.tracker.rebase();
     this.calibHold = 0;
     this.calibTime = 0;
     this.benchRoot.visible = false;
@@ -1846,8 +1861,10 @@ export class HandcastSystem extends createSystem({}) {
 
   /** `persist`: a real calibration (save the table anchor); false for a head-relative fallback. */
   private finishPlacement(persist = true, pour = true): void {
-    this.perfEvent('placed', persist ? this.placedBy : 'in front, no table');
+    this.perfEvent('placed', this.placedBy);
     this.placedBy = 'hand on table';
+    // The bench frame jumps: hand filters restart instead of easing across it.
+    this.tracker.rebase();
     this.calibrating = false;
     this.tableFinder.end();
     this.hideCalibGhost();
@@ -1880,7 +1897,9 @@ export class HandcastSystem extends createSystem({}) {
     this.benchRoot.position.set(x, y - 0.002, z);
     this.benchRoot.rotation.set(0, yaw, 0);
     this.placedBy = `table seen by the headset (${source})`;
-    this.finishPlacement();
+    // A plane is the room's own model of the table: anchor it. A depth hit could
+    // be a lap or a chair seat: use it this session, ask again next time.
+    this.finishPlacement(source === 'plane');
   }
 
   placeInFront(tableY?: number, pour = true): void {
@@ -1892,6 +1911,7 @@ export class HandcastSystem extends createSystem({}) {
     this.benchRoot.position.y = tableY ?? Math.max(0.45, this.headPos.y - 0.45);
     this.benchRoot.rotation.set(0, Math.atan2(-f.x, -f.z), 0);
     // A floating, head-relative bench is not the player's table: do not anchor it.
+    this.placedBy = 'in front, no table';
     this.finishPlacement(false, pour);
   }
 
@@ -1966,8 +1986,9 @@ export class HandcastSystem extends createSystem({}) {
           this.benchRoot.rotation.set(0, Math.atan2(-this.v2.x, -this.v2.z), 0);
           this.placed = true;
           this.perfEvent('placed', 'saved anchor');
-          if (!this.fallbackPlaced) this.pourBench([0, 0], POUR_AGAIN);
+          this.pourBench([0, 0], POUR_AGAIN);
           this.lockAfterPlace = true;
+          this.tracker.rebase();
           this.pendingPlace = false;
           this.fallbackPlaced = false;
           this.benchRoot.visible = true;
@@ -1976,8 +1997,11 @@ export class HandcastSystem extends createSystem({}) {
       }
     }
     if (this.pendingPlace && this.restoreDone && this.progress.calibrated && !this.calibrating) {
-      // Calibrated before but no anchor came back within a moment: place in front.
-      if (this.time - this.restoreAt > 1.0) this.placeInFront();
+      // Calibrated before but no usable anchor came back (another table, a
+      // cleared anchor): run the set-up again rather than float a bench. It
+      // finds the table by itself when the headset sees it, else by hand, else
+      // places in front at 15 s.
+      if (this.time - this.restoreAt > 1.0) this.startCalibration();
     }
   }
   private restoreAt = 0;

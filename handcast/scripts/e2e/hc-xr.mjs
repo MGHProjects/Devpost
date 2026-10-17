@@ -199,5 +199,17 @@ export default async function run({ page, frame }) {
   check('the hand that found the table does not cast until it lifts off', st.casts === 0 && !st.pouring, `casts=${st.casts} progress=${st.live[1].progress}`);
   await hc(() => window.handcast.iwerHand('right', null));
   await hc(() => window.handcast.iwerHand('left', null));
+
+  // 8. Back on the 2D page the attract demo cycles boards; entering XR again
+  // starts on the player's board, not the demo's.
+  const mine = (await hc(() => window.handcast.state())).level;
+  await hc(() => window.handcast.exitXR());
+  await waitFor(() => !window.handcast.xrActive(), 10000);
+  const cycled = await waitFor((b) => window.handcast.state().level !== b, 60000, mine);
+  await hc(() => window.handcast.enterXR());
+  await waitFor(() => window.handcast.xrActive(), 30000);
+  await wait(800);
+  st = await hc(() => window.handcast.state());
+  check('entering XR after the 2D demo starts on the player\'s board', cycled && st.level === mine, `demo cycled=${cycled} board=${st.level} expected=${mine}`);
   return out.join('\n');
 }

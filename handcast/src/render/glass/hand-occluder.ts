@@ -8,11 +8,16 @@
  * the dark slab and the pool are already painted where the real hand is, and
  * only later content (beams, crystals, glass) is hidden behind it.
  *
- * Here the stencil is drawn right after the dimming dome (-1000) and before
- * everything on the bench, a little outside the skin rather than inside it so
- * tracking lag does not leave the slab bleeding over finger edges. The white
- * outline is hidden: the real hand is visible, and a grown stencil would only
- * leave slivers of it (the "stray white strokes").
+ * Here the stencil becomes an opaque, depth-only pre-pass (no colour write)
+ * at renderOrder -20: opaque meshes draw before every transparent one, so it
+ * now comes before the opaque bench props (crystals, lamps, pillars) as well
+ * as the transparent slab, pool and beams, and nothing behind the real hand is
+ * painted over it. It sits a little outside the skin rather than inside it so
+ * tracking lag does not leave the slab bleeding over finger edges. Side
+ * effect: the dimming dome does not darken the hand either, so the real hand
+ * reads a touch brighter than the dimmed room. The white outline is hidden:
+ * the real hand is visible, and a grown stencil would only leave slivers of it
+ * (the "stray white strokes").
  *
  * In the IWER emulator there is no real hand behind the canvas, only a
  * synthetic room, so the stock order is kept there and the outline stays the
@@ -20,7 +25,7 @@
  */
 import { outlineMaterial, stencilMaterial, type SkinnedMesh } from '@iwsdk/core';
 
-/** After the dome (-1000), before the bench slab (-11). */
+/** First in the opaque pass, so before every bench mesh. */
 export const HAND_OCCLUDER_ORDER = -20;
 /** Shell offset: negative grows the stencil outside the skin (IWSDK: +1.2 mm inside). */
 const OCCLUDER_GROW = -0.0015;
@@ -30,6 +35,9 @@ function patchMaterials(): void {
   if (patched) return;
   patched = true;
   stencilMaterial.uniforms.outlineThickness.value = OCCLUDER_GROW;
+  stencilMaterial.transparent = false;
+  stencilMaterial.colorWrite = false;
+  stencilMaterial.needsUpdate = true;
 }
 
 /**

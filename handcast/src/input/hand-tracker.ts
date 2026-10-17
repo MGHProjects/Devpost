@@ -277,6 +277,15 @@ export class TrackedHand {
     this.stillness.feed(this.palm.center, tips, this.palm.normal, dt);
   }
 
+  /**
+   * The bench frame jumped (a placement): the next sample restarts the filter,
+   * stillness and speeds instead of easing across the jump.
+   */
+  rebase(): void {
+    this.lose();
+    this.lostTime = Infinity;
+  }
+
   /** @internal Tracking lost this frame: keep the last good data, end any pinch. */
   lose(dt = 0): void {
     this.pinch.started = false;
@@ -477,6 +486,11 @@ export class HandTracker25 {
     this.left = new TrackedHand('left', opts);
     this.right = new TrackedHand('right', opts);
     this.hands = [this.left, this.right];
+  }
+
+  /** Both hands: see TrackedHand.rebase (call when the bench is placed or moved). */
+  rebase(): void {
+    for (const h of this.hands) h.rebase();
   }
 
   /**
