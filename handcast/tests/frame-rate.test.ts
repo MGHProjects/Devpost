@@ -34,11 +34,35 @@ describe('FrameRateGovernor', () => {
     g.begin(session);
     await flush();
     for (let i = 0; i < 90 * 4; i++) g.sample(1 / 90);
-    // A heavy board: every other frame takes two vsyncs.
-    for (let i = 0; i < 300; i++) g.sample(i % 2 ? 1 / 45 : 1 / 90);
-    for (let i = 0; i < 300; i++) g.sample(1 / 45);
+    // A heavy board: one frame in eight takes two vsyncs (about 12 %), for 7 s.
+    for (let i = 0; i < 90 * 7; i++) g.sample(i % 8 === 0 ? 1 / 45 : 1 / 90);
     expect(asked).toEqual([90, 72]);
     expect(g.rate).toBe(72);
+  });
+
+  it('needs two failing windows in a row: one burst keeps 90 Hz', async () => {
+    const { session, asked } = fakeSession([72, 90]);
+    const g = new FrameRateGovernor();
+    g.begin(session);
+    await flush();
+    // One 3 s window with 10 % misses (a board loading), then smooth play.
+    for (let i = 0; i < 270; i++) g.sample(i % 10 === 0 ? 1 / 45 : 1 / 90);
+    for (let i = 0; i < 90 * 9; i++) g.sample(1 / 90);
+    expect(asked).toEqual([90]);
+  });
+
+  it('resetWindow drops frames sampled under the system menu', async () => {
+    const { session, asked } = fakeSession([72, 90]);
+    const g = new FrameRateGovernor();
+    g.begin(session);
+    await flush();
+    // One failing window, then 2.5 s of slow frames under the system menu:
+    // without the reset these would fail the second window and drop to 72 Hz.
+    for (let i = 0; i < 270; i++) g.sample(i % 10 === 0 ? 1 / 45 : 1 / 90);
+    for (let i = 0; i < 75; i++) g.sample(1 / 30);
+    g.resetWindow();
+    for (let i = 0; i < 90 * 6; i++) g.sample(1 / 90);
+    expect(asked).toEqual([90]);
   });
 
   it('treats one long hitch as a single missed frame', async () => {

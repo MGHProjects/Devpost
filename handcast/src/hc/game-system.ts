@@ -69,6 +69,9 @@ const FWD = -Math.PI / 2;
 const SLAB_HEIGHT = 0.11; // a hand participates when its palm is this close to the bench
 const BENCH_MARGIN = 0.06;
 const WITHDRAW = 0.07; // after casting, move this far before the same hand can cast again
+/** A hand locked by a bench placement is free after rising this high above the bench, or sliding this far. */
+const PLACE_LIFT = 0.045;
+const PLACE_SLIDE = 0.03;
 const PLUCK_NOTES = [74, 69, 67, 71, 76];
 const CALIB_FALLBACK = 15; // s without a flat hand: put the bench in front of the player
 /** Seconds for the bench to pour out of the palm that found the table (re-pour from an anchor: shorter). */
@@ -123,6 +126,10 @@ interface Live {
   lostFor: number;
   /** Casting progress last sent to the molten 'heat' voice. */
   heatSent: number;
+  /** lockFoot came from a bench placement (released by a small lift or slide). */
+  lockFromPlace: boolean;
+  /** Seconds a placement-locked hand has been lit and still (to say "lift"). */
+  lockLit: number;
 }
 
 type HallTab = 'featured' | 'new' | 'top';
@@ -290,6 +297,8 @@ export class HandcastSystem extends createSystem({}) {
         studioPinch: false,
         lostFor: 0,
         heatSent: 0,
+        lockFromPlace: false,
+        lockLit: 0,
       });
     }
 
@@ -571,6 +580,8 @@ export class HandcastSystem extends createSystem({}) {
     for (const l of this.live) {
       l.progress = 0;
       l.lockFoot = null;
+      l.lockFromPlace = false;
+      l.lockLit = 0;
       l.grab = null;
     }
   }
@@ -1242,13 +1253,33 @@ export class HandcastSystem extends createSystem({}) {
       this.updateKnock(l);
       this.updatePluck(l, dt);
 
-      if (l.lockFoot && (!near || Math.hypot(pc[0] - l.lockFoot[0], pc[2] - l.lockFoot[1]) > WITHDRAW)) l.lockFoot = null;
-      // Hands already on the bench when it is placed (or while it pours) must lift off first.
-      if ((this.lockAfterPlace || this.bench.pouring) && near) l.lockFoot = [pc[0], pc[2]];
+      // Hands already on the bench when it is placed (or while it pours) must lift
+      // off first; that lock lets go after a small lift or slide (3 cm), the
+      // after-cast lock only after a real withdrawal.
+      const placing = this.lockAfterPlace || this.bench.pouring;
+      if (placing && near) {
+        l.lockFoot = [pc[0], pc[2]];
+        l.lockFromPlace = true;
+      } else if (l.lockFoot) {
+        const moved = Math.hypot(pc[0] - l.lockFoot[0], pc[2] - l.lockFoot[1]);
+        const free = l.lockFromPlace ? !near || pc[1] > PLACE_LIFT || moved > PLACE_SLIDE : !near || moved > WITHDRAW;
+        if (free) {
+          if (l.lockFromPlace) h.stillness.reset();
+          l.lockFoot = null;
+          l.lockFromPlace = false;
+          l.lockLit = 0;
+        }
+      }
       const active = near && !l.grab && !l.studioPinch && this.mode !== 'demo' && !this.bench.pouring;
       l.optic = active ? computeOptic(h.toPose(), { id: `live-${h.hand}`, live: true, state: l.feat }) : null;
+      // ?perf=1: keep the finger bars live off the bench too.
+      if (!active && this.perfStats) computeOptic(h.toPose(), { id: 'perf', live: true, state: l.feat });
       if (!active || l.lockFoot) {
         this.setCasting(l, Math.max(0, l.progress - dt * 3));
+        if (l.lockFromPlace && l.optic && h.stillness.still && this.isLit(l.optic)) {
+          l.lockLit += dt;
+          if (l.lockLit > 1 && l.lockLit - dt <= 1 && this.mode === 'play') this.setStatus('Lift your hand a little, then rest it in the light again.');
+        } else l.lockLit = 0;
         continue;
       }
       // Armed: the hand is doing something with light.
@@ -1360,7 +1391,9 @@ export class HandcastSystem extends createSystem({}) {
   private updatePreplay(): void {
     if (!this.placed || this.paused || !this.bench || this.bench.pouring || this.solved || this.casts.length) return;
     if (!this.inPrologue() || this.level.id !== 'prologue-1' || !this.level.solution?.length) return;
-    for (const l of this.live) if (l.optic) this.idleSince = this.time;
+    // Progress counts as activity, not a hand merely hovering (a stuck player
+    // with a hand on the bench still gets the demo).
+    for (const l of this.live) if (l.grab || (l.progress > 0.1 && !l.lockFoot)) this.idleSince = this.time;
     const first = this.hintStage === 0 && !this.ghosts.length && this.time - this.idleSince > 1.2;
     if (!first && this.time - this.idleSince < 12) return;
     this.idleSince = this.time;
@@ -1592,7 +1625,8 @@ export class HandcastSystem extends createSystem({}) {
       if (this.perfRate) stats.event('rate', `${this.perfRate}->${rate}`);
       this.perfRate = rate;
     }
-    stats.frame(delta, rate);
+    // Frames under the system menu are not the game's (the overlay keeps drawing).
+    if (!this.paused) stats.frame(delta, rate);
     for (let i = 0; i < this.live.length; i++) {
       const l = this.live[i];
       const h = this.perfHands[i];
@@ -1657,6 +1691,9 @@ export class HandcastSystem extends createSystem({}) {
   private setPaused(on: boolean): void {
     if (on === this.paused) return;
     this.paused = on;
+    this.frameRate.resetWindow();
+    // A ghost-fist demo cut by the menu replays from the start, where it can be seen.
+    if (!on && this.knockDemo) this.knockDemo.t = 0;
     this.audio.setDucked(on);
     this.perfEvent(on ? 'pause' : 'resume');
     if (!on) return;
@@ -1734,6 +1771,7 @@ export class HandcastSystem extends createSystem({}) {
     this.calibTime = 0;
     this.benchRoot.visible = false;
     this.hud.show('calibrate');
+    this.hud.setMeterVisible(false);
     this.hud.setBoard('SET UP', 'Find your table', 'Rest a hand flat on the table, like the glass one. Hold still.');
     this.tableFinder.begin(this.world.session);
     this.showCalibGhost();
@@ -1755,11 +1793,8 @@ export class HandcastSystem extends createSystem({}) {
 
   /** Ghost hand ahead of the head at a guessed table height, pressing down 3 cm every 2 s. */
   private updateCalibGhost(dt: number): void {
+    if (!this.calibGhost && this.templates) this.showCalibGhost();
     const g = this.calibGhost;
-    if (!g) {
-      if (this.templates) this.showCalibGhost();
-      return;
-    }
     const f = this.v1.copy(this.headFwd).setY(0);
     if (f.lengthSq() < 1e-4) f.set(0, 0, -1);
     f.normalize();
@@ -1778,6 +1813,7 @@ export class HandcastSystem extends createSystem({}) {
     }
     this.calibAnchor.position.y += 0.03 * (1 - ease);
     this.calibAnchor.rotation.set(0, Math.atan2(-f.x, -f.z), 0);
+    if (!g) return;
     // Fades while a real hand is resting (it is doing the job now).
     const resting = Math.min(1, this.calibHold / 0.3);
     g.setOpacity((0.35 + 0.25 * ease) * (1 - resting));
@@ -1800,6 +1836,10 @@ export class HandcastSystem extends createSystem({}) {
       // No table found: play anyway, on a bench in front of the player. Menu > Table tries again.
       this.placeInFront();
       this.setStatus('Bench placed in front of you. Menu > Table finds your real table.');
+      const level = this.level;
+      this.after(4.5, () => {
+        if (this.level === level && !this.calibrating && !this.casts.length && !this.solved) this.setStatus(level.hint ?? this.defaultHint());
+      });
       return;
     }
     if (this.calibTime > 7 && this.calibTime - dt <= 7) {
@@ -1839,7 +1879,11 @@ export class HandcastSystem extends createSystem({}) {
       // A detected plane under the hand gives the exact height (joint radii are estimates).
       const plane = this.tableFinder.planeHeightAt(xr.getFrame(), xr.getReferenceSpace(), this.player.matrixWorld.elements, c[0], c[2], y, 0.04);
       if (plane !== null) y = plane;
-      this.placedBy = plane !== null ? 'hand on table, height from plane' : 'hand on table';
+      // Saved as the table only when the headset agrees there is a surface
+      // there; a flat hand held in mid-air is used this session only.
+      const seen = this.tableFinder.best;
+      const confirmed = plane !== null || (seen !== null && Math.abs(seen.y - y) < 0.04);
+      this.placedBy = plane !== null ? 'hand on table, height from plane' : confirmed ? 'hand on table, surface seen' : 'hand, no surface seen (not saved)';
       const dx = c[0] - this.headPos.x;
       const dz = c[2] - this.headPos.z;
       const yaw = Math.atan2(-dx, -dz);
@@ -1852,7 +1896,7 @@ export class HandcastSystem extends createSystem({}) {
       // The bench pours out from under the palm that found the table.
       const local = this.benchRoot.worldToLocal(this.v2.set(c[0], y, c[2]));
       this.pourFrom = [local.x, local.z];
-      this.finishPlacement();
+      this.finishPlacement(confirmed);
       return;
     }
     this.calibHold = Math.max(0, this.calibHold - dt);
@@ -1885,6 +1929,7 @@ export class HandcastSystem extends createSystem({}) {
     this.ambience.setBenchCenter(this.benchRoot.getWorldPosition(this.v1));
     this.audio.tick('place');
     this.hud.setBoard(this.eyebrow(), this.level.name, this.level.hint ?? this.defaultHint());
+    this.hud.setMeterVisible(true);
     this.hud.show(this.mode === 'studio' ? 'studio' : 'play');
   }
 
@@ -1953,9 +1998,13 @@ export class HandcastSystem extends createSystem({}) {
     const hud = this.hud.object;
     const xr = this.world.renderer.xr.isPresenting;
     if (this.calibrating) {
-      this.readHead();
-      this.v1.copy(this.headPos).addScaledVector(this.headFwd, 0.6);
-      this.v1.y -= 0.12;
+      // Beside the ghost hand, a little above and beyond it, facing the player:
+      // world-locked (not dragged by head pitch into the real table).
+      const a = this.calibAnchor.position;
+      this.v1.set(a.x - this.headPos.x, 0, a.z - this.headPos.z);
+      if (this.v1.lengthSq() < 1e-4) this.v1.set(0, 0, -1);
+      this.v1.normalize().multiplyScalar(0.16).add(a);
+      this.v1.y = a.y + 0.22;
     } else {
       const d = this.level ? this.level.bench.d : 0.3;
       // The panel is centred on its position: taller sections (menu ~0.23 m) sit higher.
@@ -2058,7 +2107,7 @@ export class HandcastSystem extends createSystem({}) {
     this.time = time;
     const xr = this.world.renderer.xr.isPresenting;
     if (xr) {
-      this.frameRate.sample(delta);
+      if (!this.paused && this.world.visibilityState.peek() === VisibilityState.Visible) this.frameRate.sample(delta);
       if (this.perfStats) this.perfFrame(delta, time);
       this.readHead();
     } else {
@@ -2067,7 +2116,8 @@ export class HandcastSystem extends createSystem({}) {
       this.headUp.set(0, 1, 0);
     }
     this.audio.setListener(this.headPos, this.headFwd, this.headUp);
-    this.runTimers();
+    // The system menu pauses game time: timers and demos wait for the player.
+    if (!this.paused) this.runTimers();
     if (this.gazeRestore && this.time > this.gazeRestore.at) {
       if (!this.solved && this.hud.status.startsWith('This crystal wants')) this.setStatus(this.gazeRestore.text);
       this.gazeRestore = null;
@@ -2110,7 +2160,7 @@ export class HandcastSystem extends createSystem({}) {
     this.boost = Math.max(0, this.boost - dt * 0.6);
     this.beams?.setBoost(this.boost);
     this.beams?.update(dt, time);
-    this.updateKnockDemo(dt);
+    if (!this.paused) this.updateKnockDemo(dt);
     this.updatePreplay();
     if (this.hintBeams) {
       const left = this.hintBeamsUntil - time;
@@ -2240,6 +2290,8 @@ export class HandcastSystem extends createSystem({}) {
           pinch: l.hand.pinch.active,
           pinchAt: Array.from(l.hand.pinch.point, (v) => Math.round(v * 1000)),
           studioPinch: l.studioPinch,
+          locked: !!l.lockFoot,
+          lockFromPlace: l.lockFromPlace,
         })),
       }),
       levels: () => this.source.levels().map((l) => l.id),

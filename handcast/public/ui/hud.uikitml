@@ -188,7 +188,7 @@
   }
   .menu-grid {
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
   }
   .menu-side {
     flex-direction: column;
@@ -212,11 +212,11 @@
   .grid-row {
     flex-direction: row;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
   }
   .movement-label {
     flex-shrink: 0;
-    width: 112px;
+    width: 92px;
     font-size: 14px;
     font-weight: 700;
     letter-spacing: 1px;
@@ -226,14 +226,14 @@
     color: #ffd76a;
   }
   .movement-label-hc {
-    width: 132px;
+    width: 108px;
     font-size: 16px;
     color: #ffffff;
   }
   .cell-btn {
     flex-shrink: 0;
-    width: 26px;
-    height: 26px;
+    width: 32px;
+    height: 32px;
     border-radius: 8px;
     border-width: 1px;
     border-color: rgba(255, 255, 255, 0.14);
@@ -242,9 +242,13 @@
     background-color: rgba(255, 255, 255, 0.08);
     cursor: pointer;
   }
+  .cell-btn:hover {
+    border-width: 2px;
+    border-color: #8fd0ff;
+  }
   .cell-btn-hc {
-    width: 28px;
-    height: 28px;
+    width: 34px;
+    height: 34px;
     border-width: 2px;
     border-color: #ffffff;
   }

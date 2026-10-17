@@ -30,6 +30,12 @@ const MIN_UP = 0.9;
 /** How far ahead of the head (horizontal) the table point may be. */
 const MIN_REACH = 0.15;
 const MAX_REACH = 0.9;
+/**
+ * Where the bench goes on a detected surface: this far from the head
+ * (horizontally), along the bearing of what the player looks at. A hit far
+ * across the desk gives height and direction only, never a bench out of reach.
+ */
+const SEAT_REACH = 0.42;
 /** A depth hit counts only after this many agreeing samples (every 4th frame: ~0.3 s). */
 const HIT_STABLE = 6;
 /** ...within this height and position spread (m). */
@@ -165,7 +171,15 @@ export class TableFinder {
           c.n = 1;
         }
         c.stale = 0;
-        if (c.n >= HIT_STABLE) guess = { x: c.x, y: c.y, z: c.z, source: 'hit-test' };
+        if (c.n >= HIT_STABLE) {
+          let bx = c.x - head.x;
+          let bz = c.z - head.z;
+          const bl = Math.hypot(bx, bz) || 1;
+          bx /= bl;
+          bz /= bl;
+          const d = Math.min(bl, SEAT_REACH);
+          guess = { x: head.x + bx * d, y: c.y, z: head.z + bz * d, source: 'hit-test' };
+        }
       }
     }
     if (!guess && ++this.cand.stale > HIT_STALE) {
@@ -193,9 +207,11 @@ export class TableFinder {
         if (Math.abs(n.y) < MIN_UP) continue;
         const o = mulPoint(toWorld, pm[12], pm[13], pm[14], this.p);
         if (o.y < MIN_Y || o.y > MAX_Y || o.y > head.y - 0.15) continue;
-        // Aim point: along the gaze, 0.42 m out, or the hit-test point if it lies on this plane.
-        const ax = guess && Math.abs(guess.y - o.y) < 0.04 ? guess.x : head.x + fx * 0.42;
-        const az = guess && Math.abs(guess.y - o.y) < 0.04 ? guess.z : head.z + fz * 0.42;
+        // Aim point: seated reach along the gaze, or along the hit's bearing when
+        // the hit lies on this plane (guess is already at seated reach).
+        const onIt = guess && Math.abs(guess.y - o.y) < 0.04;
+        const ax = onIt ? guess!.x : head.x + fx * SEAT_REACH;
+        const az = onIt ? guess!.z : head.z + fz * SEAT_REACH;
         const local = this.toPlaneLocal(pose.transform.inverse.matrix, toWorld, ax, o.y, az);
         if (!inPolygon(local.x, local.z, plane.polygon, 0.08)) continue;
         const score = Math.hypot(ax - head.x, az - head.z) + Math.abs(head.y - 0.45 - o.y);

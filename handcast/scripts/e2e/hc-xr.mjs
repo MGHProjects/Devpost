@@ -196,7 +196,11 @@ export default async function run({ page, frame }) {
   await waitFor(() => !window.handcast.state().pouring, 20000);
   await wait(2500);
   st = await hc(() => window.handcast.state());
-  check('the hand that found the table does not cast until it lifts off', st.casts === 0 && !st.pouring, `casts=${st.casts} progress=${st.live[1].progress}`);
+  check('the hand that found the table does not cast until it lifts off', st.casts === 0 && !st.pouring && st.live[1].locked && st.live[1].lockFromPlace, `casts=${st.casts} progress=${st.live[1].progress} locked=${st.live[1].locked}`);
+  // A small slide (4 cm) is enough to free it: no need to lift the hand away.
+  await hc((yaw) => window.handcast.iwerHand('right', 'flat', [0.045, 0.06], yaw), FWD);
+  const freed = await waitFor(() => !window.handcast.state().live[1].locked, 6000);
+  check('a small slide frees the hand that found the table', freed);
   await hc(() => window.handcast.iwerHand('right', null));
   await hc(() => window.handcast.iwerHand('left', null));
 

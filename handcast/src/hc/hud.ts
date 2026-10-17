@@ -237,6 +237,11 @@ export class Hud {
     chip.hc = this.contrast;
   }
 
+  /** The crystal chips (hidden during table set-up, where they mean nothing yet). */
+  setMeterVisible(on: boolean): void {
+    this.set('hud-meter', { display: on ? 'flex' : 'none' });
+  }
+
   setSolved(solved: boolean, hasNext: boolean, canLike = false): void {
     this.set('btn-next', { display: solved && hasNext ? 'flex' : 'none' });
     this.set('btn-hint', { display: solved ? 'none' : 'flex' });
