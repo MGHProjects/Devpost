@@ -27,8 +27,13 @@ import { outlineMaterial, stencilMaterial, type SkinnedMesh } from '@iwsdk/core'
 
 /** First in the opaque pass, so before every bench mesh. */
 export const HAND_OCCLUDER_ORDER = -20;
-/** Shell offset: negative grows the stencil outside the skin (IWSDK: +1.2 mm inside). */
-const OCCLUDER_GROW = -0.0015;
+/**
+ * Shell offset: negative grows the stencil outside the skin (IWSDK: +1.2 mm
+ * inside). 3.5 mm after the first Quest 3 session, where 1.5 mm let the bench
+ * cut into real fingertips (real fingers outgrow the generic mesh, plus lag).
+ * The molten coat sits outside it (coat-material, 4.5 mm).
+ */
+const OCCLUDER_GROW = -0.0035;
 let patched = false;
 
 function patchMaterials(): void {

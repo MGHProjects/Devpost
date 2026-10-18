@@ -27,7 +27,7 @@ export interface CoatMesh {
 }
 
 export interface CoatOptions {
-  /** Shell offset outside the skin, metres (default 0.002). */
+  /** Shell offset outside the skin, metres (default 0.0045: outside the 3.5 mm hand occluder). */
   inflate?: number;
   /** Render order (default 1000: after IWSDK's hand outline at 999). */
   renderOrder?: number;
@@ -37,7 +37,7 @@ export function createCoatMesh(live: SkinnedMesh, opts: CoatOptions = {}): CoatM
   ensureGlassAttributes(live);
   const material = createGlassMaterial('glass', { side: FrontSide });
   const u = material.uniforms;
-  u.uInflate.value = opts.inflate ?? 0.002;
+  u.uInflate.value = opts.inflate ?? 0.0045;
   u.uMolten.value = 0;
   u.uHeat.value = 1;
 

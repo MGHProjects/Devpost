@@ -82,8 +82,10 @@ const TOUR = ['fingers-3', 'mirror-1', 'relay-1', 'colour-5', 'relay-8', 'finale
 /** Set-up: with a table detected by the headset (planes or hit-test), place on it after this many seconds without a hand. */
 const CALIB_DETECTED = 9;
 /** Stillness tolerances: normal, and Steady mode (for tremor: wider, more forgiving). */
-const STILL_NORMAL = { tolPalm: 0.007, tolTip: 0.01, tolAngle: (4 * Math.PI) / 180, outliers: 1 };
-const STILL_STEADY = { tolPalm: 0.014, tolTip: 0.02, tolAngle: (8 * Math.PI) / 180, outliers: 3 };
+// Fingertip tolerance from the first Quest 3 session (12 mm: real resting
+// fingertips jitter more than emulated ones; only light-carrying tips count).
+const STILL_NORMAL = { tolPalm: 0.007, tolTip: 0.012, tolAngle: (4 * Math.PI) / 180, outliers: 1 };
+const STILL_STEADY = { tolPalm: 0.014, tolTip: 0.024, tolAngle: (8 * Math.PI) / 180, outliers: 3 };
 
 interface Cast {
   id: number;
@@ -97,6 +99,8 @@ interface Cast {
   cooling: number; // 1 -> 0 after creation
   flowing: boolean;
   kind: 'glass' | 'ghost';
+  /** Fingers the live hand showed as extended when it set (local boards); see computeOptic `fixed`. */
+  fixed?: boolean[];
 }
 
 interface Grab {
@@ -264,6 +268,8 @@ export class HandcastSystem extends createSystem({}) {
   private v1 = new Vector3();
   private v2 = new Vector3();
   private v3 = new Vector3();
+  /** The eye in bench space, for the hidden-finger rule (updated per frame). */
+  private eyeBench: [number, number, number] = [0, 0, 0];
   private headPos = new Vector3();
   private headFwd = new Vector3();
   private headUp = new Vector3();
@@ -626,7 +632,7 @@ export class HandcastSystem extends createSystem({}) {
     return this.level.budget - this.casts.length;
   }
 
-  addCast(pose: HandPose, kind: 'glass' | 'ghost' = 'glass', animate = true): Cast | null {
+  addCast(pose: HandPose, kind: 'glass' | 'ghost' = 'glass', animate = true, fixed?: boolean[]): Cast | null {
     if (!this.templates || !this.bench) return null;
     const view = new CastView(this.templates, pose, kind, kind === 'ghost' ? { subdivide: 0 } : {});
     this.bench.root.add(view.root);
@@ -637,7 +643,8 @@ export class HandcastSystem extends createSystem({}) {
       yaw: 0,
       offset: [0, 0],
       pose,
-      optic: computeOptic(pose, { id: `cast-${this.nextCastId}`, live: false }),
+      optic: computeOptic(pose, { id: `cast-${this.nextCastId}`, live: false, fixed }),
+      fixed,
       view,
       cooling: animate ? 1 : 0,
       flowing: false,
@@ -659,7 +666,7 @@ export class HandcastSystem extends createSystem({}) {
     c.yaw = yaw;
     c.offset = offset;
     c.pose = transformPose(c.base, c.baseFoot, yaw, offset[0], offset[1]);
-    c.optic = computeOptic(c.pose, { id: c.optic.id, live: false });
+    c.optic = computeOptic(c.pose, { id: c.optic.id, live: false, fixed: c.fixed });
     c.view.root.position.set(c.baseFoot[0] + offset[0], 0, c.baseFoot[1] + offset[1]);
     c.view.root.rotation.y = yaw;
     this.castsDirty = true;
@@ -1225,6 +1232,11 @@ export class HandcastSystem extends createSystem({}) {
     }
     const hw = this.level.bench.w / 2 + BENCH_MARGIN;
     const hd = this.level.bench.d / 2 + BENCH_MARGIN;
+    this.readHead();
+    const eye = this.benchRoot.worldToLocal(this.v3.copy(this.headPos));
+    this.eyeBench[0] = eye.x;
+    this.eyeBench[1] = eye.y;
+    this.eyeBench[2] = eye.z;
 
     for (const l of this.live) {
       const h = l.hand;
@@ -1271,9 +1283,18 @@ export class HandcastSystem extends createSystem({}) {
         }
       }
       const active = near && !l.grab && !l.studioPinch && this.mode !== 'demo' && !this.bench.pouring;
-      l.optic = active ? computeOptic(h.toPose(), { id: `live-${h.hand}`, live: true, state: l.feat }) : null;
+      const wasExt = this.perfStats && h.stillness.still ? l.feat.extended.reduce((m, e, f) => (e ? m | (1 << f) : m), 0) : -1;
+      l.optic = active ? computeOptic(h.toPose(), { id: `live-${h.hand}`, live: true, state: l.feat, viewer: this.eyeBench }) : null;
       // ?perf=1: keep the finger bars live off the bench too.
-      if (!active && this.perfStats) computeOptic(h.toPose(), { id: 'perf', live: true, state: l.feat });
+      if (!active && this.perfStats) computeOptic(h.toPose(), { id: 'perf', live: true, state: l.feat, viewer: this.eyeBench });
+      // Stillness watches only the fingertips that carry light (plus the palm).
+      let mask = 0;
+      for (let f = 0; f < 5; f++) if (l.feat.extended[f]) mask |= 1 << f;
+      h.stillness.tipMask = l.optic ? mask : 0b11111;
+      if (wasExt >= 0 && this.perfStats) {
+        const flips = wasExt ^ mask;
+        for (let f = 0; f < 5; f++) if (flips & (1 << f)) this.perfStats.fingerFlip(f);
+      }
       if (!active || l.lockFoot) {
         this.setCasting(l, Math.max(0, l.progress - dt * 3));
         if (l.lockFromPlace && l.optic && h.stillness.still && this.isLit(l.optic)) {
@@ -1355,7 +1376,11 @@ export class HandcastSystem extends createSystem({}) {
     // Studio casts are published: give them canonical proportions now, so the
     // crystals dropped on their beams match the anonymised solution exactly.
     if (this.mode === 'studio') pose = retargetCast(pose);
-    const cast = this.addCast(pose);
+    // On local boards the glass keeps exactly the fingers the live hand showed
+    // (no surprise ray from a finger that read curled). Studio and Hall boards
+    // are re-traced from the pose by the server, so they use the pose alone.
+    const local = this.mode === 'play' && this.levelIndex !== SLOT.hall;
+    const cast = this.addCast(pose, 'glass', true, local ? l.feat.extended.slice(0, 5) : undefined);
     l.lockFoot = footOf(pose);
     l.hand.stillness.reset();
     l.progress = 0;
@@ -1583,7 +1608,8 @@ export class HandcastSystem extends createSystem({}) {
   // ------------------------------------------------------------------ table placement
 
   private enterXR(): void {
-    this.frameRate.begin(this.world.session);
+    // Steady 72 Hz (the Quest Browser default) unless ?hz=90 asks to try 90.
+    this.frameRate.begin(this.world.session, new URLSearchParams(window.location.search).get('hz') === '90');
     if (this.capture) {
       this.audio.log = [];
       this.captureT0 = this.audio.clock();

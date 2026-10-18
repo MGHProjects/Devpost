@@ -31,8 +31,13 @@ export class FrameRateGovernor {
   private failed = 0;
   private settled = false;
 
-  /** Call on session start. Safe to call when the API is missing. */
-  begin(session: XRSession | null | undefined): void {
+  /**
+   * Call on session start. Safe to call when the API is missing. 90 Hz is
+   * asked for only when `allowHigh` (the first Quest 3 session could not hold
+   * it: about 13 ms per frame, so it fell back after judder in the first
+   * minute; 72 Hz held with 0.7 % missed frames).
+   */
+  begin(session: XRSession | null | undefined, allowHigh = true): void {
     this.session = (session as RateSession) ?? null;
     this.target = 0;
     this.sampled = 0;
@@ -42,7 +47,7 @@ export class FrameRateGovernor {
     this.settled = false;
     const s = this.session;
     const rates = s?.supportedFrameRates;
-    if (!s?.updateTargetFrameRate || !rates || !Array.from(rates).includes(HIGH)) {
+    if (!allowHigh || !s?.updateTargetFrameRate || !rates || !Array.from(rates).includes(HIGH)) {
       this.settled = true;
       return;
     }

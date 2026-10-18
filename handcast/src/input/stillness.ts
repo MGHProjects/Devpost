@@ -48,6 +48,12 @@ export class StillnessDetector {
   readonly fall: number;
   outliers: number;
   readonly minSamples: number;
+  /**
+   * Fingertips that count (bit f = finger f). Only the fingers that carry
+   * light matter: a curled finger hidden under the hand is the tracker's guess
+   * and jitters, and must not keep a still hand from casting.
+   */
+  tipMask = 0b11111;
 
   private readonly cap: number;
   private readonly palmBuf: Float32Array;
@@ -173,6 +179,7 @@ export class StillnessDetector {
         ok = (nx * m[18] + ny * m[19] + nz * m[20]) / len >= cosTol;
       }
       for (let t = 0; ok && t < 5; t++) {
+        if (!(this.tipMask & (1 << t))) continue;
         const ti = slot * 15 + t * 3;
         const mi = 3 + t * 3;
         ok =

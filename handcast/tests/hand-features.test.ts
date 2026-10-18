@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeOptic, type FeatureState } from '../src/core/hand-features.js';
+import { computeOptic, hiddenTip, type FeatureState } from '../src/core/hand-features.js';
 import { KNUCKLE, TIP } from '../src/core/joints.js';
 import type { Handedness, HandPose } from '../src/core/types.js';
 import { signedArea } from '../src/core/vec2.js';
@@ -205,29 +205,76 @@ describe('computeOptic', () => {
     expect(o.ports.map((p) => p.open)).toEqual([false, true, false, false, false, true]);
   });
 
-  it('finger extension has hysteresis between 0.82 and 0.88', () => {
-    // Find a curl giving index straightness ~0.85.
+  it('finger extension has hysteresis between 0.86 and 0.88', () => {
+    // Find a curl giving index straightness ~0.87.
     let lo = 0;
     let hi = 1;
     for (let i = 0; i < 40; i++) {
       const c = (lo + hi) / 2;
-      if (straightness(makeHand({ curl: [0, c, 0, 0, 0] }), 1) > 0.85) lo = c;
+      if (straightness(makeHand({ curl: [0, c, 0, 0, 0] }), 1) > 0.87) lo = c;
       else hi = c;
     }
     const mid = makeHand({ curl: [0, lo, 0, 0, 0] });
-    expect(straightness(mid, 1)).toBeCloseTo(0.85, 3);
+    expect(straightness(mid, 1)).toBeCloseTo(0.87, 3);
     expect(computeOptic(mid, opt).ports[1].open).toBe(false);
 
     const state: FeatureState = { extended: [] };
     expect(computeOptic(makeHand(), { ...opt, state }).ports[1].open).toBe(true);
     expect(state.extended).toEqual([true, true, true, true, true]);
-    // Same 0.85 pose now stays extended because it was extended.
+    // Same 0.87 pose now stays extended because it was extended.
     expect(computeOptic(mid, { ...opt, state }).ports[1].open).toBe(true);
     expect(state.extended[1]).toBe(true);
-    // Below the exit threshold it releases, and 0.85 does not re-enter.
+    // Below the exit threshold it releases, and 0.87 does not re-enter.
     computeOptic(makeHand({ curl: [0, 0.8, 0, 0, 0] }), { ...opt, state });
     expect(state.extended[1]).toBe(false);
     expect(computeOptic(mid, { ...opt, state }).ports[1].open).toBe(false);
+  });
+
+  it('a loosely curled finger (0.84) no longer stays open through hysteresis', () => {
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 40; i++) {
+      const c = (lo + hi) / 2;
+      if (straightness(makeHand({ curl: [0, c, 0, 0, 0] }), 1) > 0.84) lo = c;
+      else hi = c;
+    }
+    const loose = makeHand({ curl: [0, lo, 0, 0, 0] });
+    const state: FeatureState = { extended: [] };
+    computeOptic(makeHand(), { ...opt, state });
+    expect(computeOptic(loose, { ...opt, state }).ports[1].open).toBe(false);
+  });
+
+  it('a fingertip hidden from the viewer must read clearly straight to count', () => {
+    // Middle finger at straightness ~0.91: open for a viewer who can see it,
+    // closed for one whose line of sight to its tip passes the index knuckle.
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 40; i++) {
+      const c = (lo + hi) / 2;
+      if (straightness(makeHand({ curl: [0, 0, c, 0, 0] }), 2) > 0.91) lo = c;
+      else hi = c;
+    }
+    const hand = makeHand({ curl: [0, 0, lo, 0, 0] });
+    const p = hand.pos;
+    const tip = [p[14 * 3], p[14 * 3 + 1], p[14 * 3 + 2]];
+    const k = [p[6 * 3], p[6 * 3 + 1], p[6 * 3 + 2]];
+    // Eye 0.5 m beyond the index knuckle, on the line from the middle tip through it.
+    const d = [k[0] - tip[0], k[1] - tip[1], k[2] - tip[2]];
+    const l = Math.hypot(d[0], d[1], d[2]);
+    const behind = [k[0] + (d[0] / l) * 0.5, k[1] + (d[1] / l) * 0.5, k[2] + (d[2] / l) * 0.5] as [number, number, number];
+    expect(hiddenTip(p, 2, behind)).toBe(true);
+    expect(computeOptic(hand, { ...opt, viewer: behind }).ports[2].open).toBe(false);
+    // Seen from straight above the tip, nothing hides it: it stays open.
+    const above = [tip[0], tip[1] + 0.5, tip[2]] as [number, number, number];
+    expect(hiddenTip(p, 2, above)).toBe(false);
+    expect(computeOptic(hand, { ...opt, viewer: above }).ports[2].open).toBe(true);
+    // A clearly straight hidden finger still counts.
+    expect(computeOptic(makeHand(), { ...opt, viewer: behind }).ports[2].open).toBe(true);
+  });
+
+  it('fixed fingers override straightness (a glass hand keeps what the live hand showed)', () => {
+    const o = computeOptic(makeHand(), { ...opt, fixed: [true, true, false, false, false] });
+    expect(o.ports.slice(0, 5).map((q) => q.open)).toEqual([true, true, false, false, false]);
   });
 
   it('closes the port of a finger pointing too steeply into the bench', () => {

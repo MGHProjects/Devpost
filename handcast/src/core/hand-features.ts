@@ -26,15 +26,31 @@ export interface OpticOptions {
   state?: FeatureState;
   /** Bench-top y in pose space (default 0). */
   benchY?: number;
+  /**
+   * The viewer's eye in pose space (live hands). A fingertip hidden from it
+   * behind another finger or the palm is only an estimate by the tracker, so
+   * it must read clearly straight (FEATURE.hiddenEnter) to count as extended.
+   */
+  viewer?: readonly [number, number, number];
+  /**
+   * Which fingers are extended, decided elsewhere (a glass hand keeps what the
+   * live hand showed when it set); skips the straightness test.
+   */
+  fixed?: readonly boolean[];
 }
 
 /** Tunables (exported for tests / debug overlays). */
 export const FEATURE = {
   longEnter: 0.88,
-  longExit: 0.82,
+  /** Narrow hysteresis: a loosely curled finger (0.82-0.86) no longer stays "open". */
+  longExit: 0.86,
   longMaxAngle: 60 * DEG,
   thumbEnter: 0.86,
-  thumbExit: 0.8,
+  thumbExit: 0.84,
+  /** Straightness a finger hidden from the viewer needs, in or out of hysteresis. */
+  hiddenEnter: 0.95,
+  /** A point this close to the eye-to-fingertip line (and in front of the tip) hides it. */
+  hideRadius: 0.011,
   thumbMaxAngle: 95 * DEG,
   /** Min |xz(T - K)| / |T - K| for a finger to emit into the sheet. */
   minProjected: 0.5,
@@ -76,6 +92,39 @@ function unit2(x: number, z: number, fx: number, fz: number): V2 {
   return l < 1e-9 ? [fx, fz] : [x / l, z / l];
 }
 
+/** Joints that can hide a fingertip: every other finger's joints, plus the palm. */
+const OCCLUDERS: readonly (readonly number[])[] = [0, 1, 2, 3, 4].map((f) => {
+  const out: number[] = [0, KNUCKLE[1], KNUCKLE[2], KNUCKLE[3], KNUCKLE[4]];
+  for (let g = 0; g < 5; g++) if (g !== f) for (const j of FINGER_CHAINS[g]) if (!out.includes(j)) out.push(j);
+  return out;
+});
+
+/**
+ * Whether finger f's tip is hidden from `eye` behind another finger or the
+ * palm: some occluding joint lies within FEATURE.hideRadius of the segment
+ * from the eye to the tip, between them. Allocation-free.
+ */
+export function hiddenTip(pos: ArrayLike<number>, f: number, eye: readonly [number, number, number]): boolean {
+  const t = TIP[f] * 3;
+  const tx = pos[t], ty = pos[t + 1], tz = pos[t + 2];
+  const dx = tx - eye[0], dy = ty - eye[1], dz = tz - eye[2];
+  const l2 = dx * dx + dy * dy + dz * dz;
+  if (l2 < 1e-6) return false;
+  const r2 = FEATURE.hideRadius * FEATURE.hideRadius;
+  // Joints of the finger itself (its knuckle and up) never hide its own tip.
+  const own = FINGER_CHAINS[f];
+  for (const j of OCCLUDERS[f]) {
+    if (own.includes(j)) continue;
+    const px = pos[j * 3] - eye[0], py = pos[j * 3 + 1] - eye[1], pz = pos[j * 3 + 2] - eye[2];
+    const u = (px * dx + py * dy + pz * dz) / l2;
+    // In front of the tip (with a margin so a neighbour level with it does not count).
+    if (u <= 0 || u >= 0.97) continue;
+    const ex = px - u * dx, ey = py - u * dy, ez = pz - u * dz;
+    if (ex * ex + ey * ey + ez * ez < r2) return true;
+  }
+  return false;
+}
+
 /** Computes the optical abstraction of a hand pose. */
 export function computeOptic(pose: HandPose, opts: OpticOptions): HandOptic {
   const pos = pose.pos;
@@ -103,6 +152,9 @@ export function computeOptic(pose: HandPose, opts: OpticOptions): HandOptic {
   if (state && state.extended.length < 5) {
     for (let f = state.extended.length; f < 5; f++) state.extended[f] = false;
   }
+  // Stacked fingers on a hand held on its edge are real (blade): only fans and
+  // fists get the hidden-finger rule.
+  const edgeOn = Math.abs(n[1]) <= FEATURE.bladeMaxNy;
   for (let f = 0; f < 5; f++) {
     const chain = FINGER_CHAINS[f];
     const k = KNUCKLE[f];
@@ -122,11 +174,14 @@ export function computeOptic(pose: HandPose, opts: OpticOptions): HandOptic {
     const s = L > 1e-9 ? reach / L : 0;
     if (state?.ratio) state.ratio[f] = s;
     const was = state ? state.extended[f] : false;
-    const threshold = thumb
+    let threshold: number = thumb
       ? was ? FEATURE.thumbExit : FEATURE.thumbEnter
       : was ? FEATURE.longExit : FEATURE.longEnter;
+    if (opts.viewer && !edgeOn && s > threshold && s < FEATURE.hiddenEnter && hiddenTip(pos, f, opts.viewer)) {
+      threshold = FEATURE.hiddenEnter;
+    }
     const maxAngle = thumb ? FEATURE.thumbMaxAngle : FEATURE.longMaxAngle;
-    const ext = s > threshold && angle3(kt, axis) < maxAngle;
+    const ext = opts.fixed ? !!opts.fixed[f] : s > threshold && angle3(kt, axis) < maxAngle;
     extended[f] = ext;
     if (state) state.extended[f] = ext;
     const xzLen = Math.hypot(kt[0], kt[2]);

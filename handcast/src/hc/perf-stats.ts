@@ -73,6 +73,11 @@ export class PerfStats {
   private boards = new Map<string, BoardStats>();
   private board: BoardStats | null = null;
   private all = newBoard('all');
+  /** Finger extended/curled changes while the hand was still (T I M R P): read noise. */
+  readonly flips = [0, 0, 0, 0, 0];
+  fingerFlip(f: number): void {
+    if (f >= 0 && f < 5) this.flips[f]++;
+  }
   /** Session clock (s), advanced by frame(). */
   time = 0;
 
@@ -164,6 +169,7 @@ export class PerfStats {
       `tracking lost: right ${count('loss', 'right')}, left ${count('loss', 'left')}   pauses ${count('pause')}   ` +
         `rate: ${this.events.filter((e) => e.kind === 'rate').map((e) => `${e.detail} Hz @${mmss(e.t)}`).join(', ') || 'unchanged'}`,
     );
+    lines.push(`finger flips while still: T ${this.flips[0]}, I ${this.flips[1]}, M ${this.flips[2]}, R ${this.flips[3]}, P ${this.flips[4]}`);
     const placed = this.events.find((e) => e.kind === 'placed');
     const firstCast = this.events.find((e) => e.kind === 'cast');
     const firstSolve = this.events.find((e) => e.kind === 'solved');
