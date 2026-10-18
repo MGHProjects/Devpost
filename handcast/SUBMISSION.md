@@ -72,13 +72,12 @@ palm, flush with the tabletop and anchored for next time. Your real hand is
 drawn in front of the light, not under the bench.
 
 **Built for Quest 3 and the coming VR Glasses.** Essential UI sits in a narrow
-field of view; menus answer gaze plus pinch; 90 Hz, falling back to a steady
-72 when needed.
+field of view; menus answer gaze plus pinch; steady 72 Hz on Quest 3.
 
-**Intent and tracking loss.** Hold-still tolerances (7 mm palm, 10 mm
-fingertips, 4 degrees), open/curled hysteresis, a 0.25 s gap tolerance, Steady
-mode, a hand that must lift off before it casts again, and a pause while the
-system menu is up. In the prologue a dead-end cast is knocked over by a ghost
+**Intent and tracking loss.** A fingertip hidden from your eyes must read
+clearly straight to count; only light-carrying fingers must hold still (7 mm
+palm, 12 mm tips); the glass keeps exactly the fingers you saw; 0.25 s gap
+tolerance, Steady mode and a pause while the system menu is up. In the prologue a dead-end cast is knocked over by a ghost
 fist and refunded, so a newcomer never gets stuck.
 
 **Content and coming back.** 49 boards in seven chapters, a Daily with a
@@ -93,7 +92,7 @@ emulated hand tracking.
 
 **Design insight.** Hand-shadow puzzles make you hold one hand still while the
 other works. Freezing the pose removes that strain and turns your hand into an
-object you can move, knock over, play and share.
+object to move, knock over, play and share.
 
 **What's next.** Ink that stains a finger, two hands touching to fuse glass,
 and a Meta Horizon Store release as a PWA (target Q1 2027).
@@ -106,15 +105,20 @@ and a Meta Horizon Store release as a PWA (target Q1 2027).
   minimum cutoff, beta 12); joint orientations are slerp-smoothed with a
   cutoff that rises with the error.
 - **Hand optics.** A finger is open when its tip-to-knuckle distance is more
-  than 0.88 of its bone length (it closes again below 0.82, so it does not
-  flicker). Palm facing up or down with fingers open = fan. Hand on its edge
+  than 0.88 of its bone length (it closes again below 0.86, so a loosely
+  curled finger does not stay open). A fingertip hidden from the player's eyes
+  behind another finger or the palm is the tracker's estimate, so it must read
+  0.95 to count (hands held on their edge are exempt: stacked fingers are real
+  there). A glass hand keeps exactly the fingers the live hand showed when it
+  set. Palm facing up or down with fingers open = fan. Hand on its edge
   with all four long fingers open and together = blade, a two-sided mirror
   from wrist to middle fingertip. No finger open = stone, which absorbs.
 - **Pinch.** Thumb-tip to index-tip distance with hysteresis: on below 18 mm,
   off above 32 mm. The pinch point is the midpoint of the two tips.
 - **Stillness.** Over a 0.6 s window the palm centre must stay within 7 mm of
-  its mean, every fingertip within 10 mm and the palm normal within 4 degrees;
-  one bad sample is forgiven.
+  its mean, each light-carrying fingertip within 12 mm (curled fingers are
+  ignored: their tracked position is a guess that jitters) and the palm normal
+  within 4 degrees; one bad sample is forgiven.
 - **Casting.** A hand over the bench (palm less than 11 cm above it) that is
   lit (a fan hand receiving light, or a blade or fist touched by a beam
   anywhere along it) and
@@ -144,9 +148,10 @@ and a Meta Horizon Store release as a PWA (target Q1 2027).
   to face you; that hand must lift off before it can cast. With no hand after
   9 s the bench pours onto the detected table; with neither feature granted it
   appears in front of you at 15 s. The table is saved as a persistent anchor.
-- **Your hand in front of the light.** IWSDK's depth-writing hand mesh is drawn
-  before the bench and grown 1.5 mm outside the skin, so in passthrough your
-  real hand covers the slab, beams and crystals behind it.
+- **Your hand in front of the light.** IWSDK's depth-writing hand mesh becomes
+  a depth-only pre-pass drawn before every bench mesh and grown 3.5 mm outside
+  the skin, so in passthrough your real hand covers the slab, beams and
+  crystals behind it.
 - **System menu.** While the Quest menu is open, a held glass hand is set
   down, a pour in progress drains and sound is ducked; tracking restarts fresh
   when you come back.
