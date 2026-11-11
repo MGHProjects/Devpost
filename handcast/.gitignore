@@ -46,3 +46,4 @@ pids/
 
 # Local test captures
 artifacts/
+out/
