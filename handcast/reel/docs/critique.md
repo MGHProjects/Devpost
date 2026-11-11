@@ -12,3 +12,11 @@ Worst three:
 1. Shard wipe (4 to 5) read as a grid of lines: seams and motion-blurred spinning triangles. Replaced by a cut on b38 with a settling punch-in, right after the game's own real shatter (better than a fake one).
 2. Secondary captions small at phone size. Raised to 42 px.
 3. "ANY TABLE" whoosh peaked 163 ms off an onset. Now a click on the beat.
+
+## Round 3 (encoded final, sampled every 1.5 s)
+Scores: hook 8 · readability 8 · motion 8 · variety 8 · brand 9 · sync 9 (45/47 within 20 ms; the two misses are 21-22 ms)
+Checked on the encoded file: 75.0 s, 1920x1080, 60 fps, yuv420p, AAC, -14.1 LUFS / -1.2 dBTP.
+Remaining (next pass, not blocking):
+1. The secondary captions still read small on a phone; a two-line layout at 48 px would fix it.
+2. The hook opens on a molten hand already moving; a 0.5 s held frame of the bare hand first would sharpen the "hold still" idea.
+3. Grain is subtle to invisible after encode; either raise it or drop it.
