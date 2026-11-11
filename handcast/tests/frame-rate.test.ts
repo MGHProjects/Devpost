@@ -90,4 +90,14 @@ describe('FrameRateGovernor', () => {
     g.sample(1);
     expect(g.rate).toBe(0);
   });
+
+  it('without allowHigh it asks a 90 Hz headset for a steady 72 Hz', async () => {
+    const { session, asked } = fakeSession([72, 90]);
+    (session as unknown as { frameRate: number }).frameRate = 90;
+    const g = new FrameRateGovernor();
+    g.begin(session, false);
+    await flush();
+    expect(asked).toEqual([72]);
+    expect(g.rate).toBe(72);
+  });
 });

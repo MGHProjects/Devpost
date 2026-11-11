@@ -4,7 +4,7 @@ Cuts the trailer from footage recorded on a Meta Quest 3 (passthrough, real
 hands, game audio). Each shot is a time range of the source with one caption;
 every shot is labelled "Captured on Meta Quest 3". Brand cards open and close.
 
-Usage: python3 scripts/video/cut-real.py SOURCE.mp4 OUT.mp4 [--shots shots.json]
+Usage: python3 scripts/video/cut-real.py SOURCE.mp4 OUT.mp4 [--shots shots.json] [--safe 1.0]
 
 Shot times are for the first capture (capture-1, 6:40, 848x478); a new
 recording needs its own shot list (--shots, a JSON list of [start, end, caption]).
@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 BRAND = ROOT / 'media' / 'brand'
 FONT = '/usr/share/fonts/opentype/inter/Inter-{}.otf'
-W, H, FPS = 1280, 720, 30
+W, H, FPS = 1920, 1080, 30
 LABEL = 'Captured on Meta Quest 3'
 SAFE = 0.82
 
@@ -56,10 +56,10 @@ def shot(src: str, start: float, end: float, caption: str, out: Path) -> None:
     vf = (
         f'crop=iw*{SAFE}:ih*{SAFE}:iw*(1-{SAFE}):ih*(1-{SAFE}),'
         f'scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={FPS},'
-        f"drawtext=fontfile={FONT.format('SemiBold')}:text='{esc(caption)}':fontsize=34:fontcolor=white:"
-        f'x=(w-text_w)/2:y=h-92:box=1:boxcolor=0x070a10@0.62:boxborderw=18,'
-        f"drawtext=fontfile={FONT.format('Medium')}:text='{esc(LABEL)}':fontsize=18:fontcolor=white@0.85:"
-        f'x=w-text_w-24:y=22:box=1:boxcolor=0x070a10@0.5:boxborderw=8,'
+        f"drawtext=fontfile={FONT.format('SemiBold')}:text='{esc(caption)}':fontsize=48:fontcolor=white:"
+        f'x=(w-text_w)/2:y=h-136:box=1:boxcolor=0x070a10@0.62:boxborderw=26,'
+        f"drawtext=fontfile={FONT.format('Medium')}:text='{esc(LABEL)}':fontsize=26:fontcolor=white@0.85:"
+        f'x=w-text_w-36:y=32:box=1:boxcolor=0x070a10@0.5:boxborderw=12,'
         f'fade=t=in:st=0:d={fade},fade=t=out:st={dur - fade:.3f}:d={fade}'
     )
     af = f'afade=t=in:st=0:d={fade},afade=t=out:st={dur - fade:.3f}:d={fade},aresample=48000'
@@ -83,6 +83,9 @@ def main() -> None:
         sys.exit(__doc__)
     src, dst = args[0], Path(args[1])
     shots = SHOTS
+    global SAFE
+    if '--safe' in args:
+        SAFE = float(args[args.index('--safe') + 1])
     if '--shots' in args:
         shots = [tuple(s) for s in json.loads(Path(args[args.index('--shots') + 1]).read_text())]
     with tempfile.TemporaryDirectory() as tmp:

@@ -47,7 +47,19 @@ export class FrameRateGovernor {
     this.settled = false;
     const s = this.session;
     const rates = s?.supportedFrameRates;
-    if (!allowHigh || !s?.updateTargetFrameRate || !rates || !Array.from(rates).includes(HIGH)) {
+    if (!allowHigh) {
+      // The headset may already run at 90 Hz (Quest 3 on recent OS versions
+      // did, measured: 11.5 ms median, 3 % missed). Ask for a steady 72.
+      this.settled = true;
+      if (s?.updateTargetFrameRate && rates && Array.from(rates).includes(SAFE) && s.frameRate !== SAFE) {
+        s.updateTargetFrameRate(SAFE).then(
+          () => (this.target = SAFE),
+          () => undefined,
+        );
+      }
+      return;
+    }
+    if (!s?.updateTargetFrameRate || !rates || !Array.from(rates).includes(HIGH)) {
       this.settled = true;
       return;
     }
