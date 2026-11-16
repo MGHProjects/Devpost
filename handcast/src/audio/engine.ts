@@ -10,6 +10,7 @@
  */
 
 import { GlassVoices } from './voices.js';
+import { bassStep, STEPS, stepSeconds, tempoFor, voiceStep } from './groove.js';
 
 const midiToFreq = (m: number): number => 440 * 2 ** ((m - 69) / 12);
 const MASTER_GAIN = 0.8;
@@ -31,7 +32,7 @@ interface Sustain {
 
 export interface AudioEvent {
   t: number;
-  name: 'bell' | 'startSustain' | 'stopSustain' | 'stopAllSustains' | 'tick' | 'resolve' | 'song' | 'setAmbient' | 'voice';
+  name: 'bell' | 'mallet' | 'startSustain' | 'stopSustain' | 'stopAllSustains' | 'tick' | 'resolve' | 'song' | 'setAmbient' | 'voice';
   args: unknown[];
 }
 
@@ -56,6 +57,10 @@ export class AudioEngine {
   private wet!: GainNode;
   private sustains = new Map<number, Sustain>();
   private ambient: { gain: GainNode; oscs: OscillatorNode[] } | null = null;
+  /** The board's beat clock (see groove.ts); null between boards. */
+  private groove: { stepS: number; bass: number; step: number; next: number } | null = null;
+  /** Crystal voices held by glass hands: id -> note, rank and where it rings. */
+  private layers = new Map<number, { midi: number; rank: number; pos?: Vec3Like }>();
   /** Added to the context clock; used when replaying a log offline. */
   private offset = 0;
   muted = false;
@@ -205,7 +210,7 @@ export class AudioEngine {
     const t = this.now();
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.setTargetAtTime(this.muted ? 0.0001 : 0.05, t, 0.35);
+    gain.gain.setTargetAtTime(this.muted ? 0.0001 : 0.03, t, 0.35);
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.frequency.value = midiToFreq(midi) * 3;
@@ -236,6 +241,7 @@ export class AudioEngine {
 
   stopAllSustains(): void {
     this.record('stopAllSustains', []);
+    this.layers.clear();
     const log = this.log;
     this.log = null;
     for (const id of [...this.sustains.keys()]) this.stopSustain(id);
@@ -309,6 +315,87 @@ export class AudioEngine {
     this.log = log;
   }
 
+  /**
+   * Starts the board's beat clock at the tempo of its key (null stops it).
+   * Not logged: the notes it schedules are logged one by one (`mallet`).
+   */
+  setGroove(tonic: number | null, bass: number): void {
+    this.layers.clear();
+    this.groove = tonic === null ? null : { stepS: stepSeconds(tempoFor(tonic)), bass, step: 0, next: -1 };
+  }
+
+  /** A crystal held lit by glass joins the song (midi) or leaves it (null). */
+  setLayer(id: number, midi: number | null, rank = 0, pos?: Vec3Like): void {
+    if (midi === null) this.layers.delete(id);
+    else this.layers.set(id, { midi, rank, pos: v(pos) });
+  }
+
+  /**
+   * Call every frame: schedules the next sixteenths of the groove a little
+   * ahead on the audio clock. After a pause (no calls), it rejoins the grid
+   * instead of firing the missed steps.
+   */
+  pump(): void {
+    const g = this.groove;
+    if (!g || !this.ctx || this.muted || !this.layers.size) {
+      if (g) g.next = -1;
+      return;
+    }
+    const now = this.ctx.currentTime;
+    if (g.next < now - 0.05) {
+      // (re)start on the next bar line so a newly held crystal enters on the one
+      g.next = now + 0.05;
+      g.step = 0;
+    }
+    const horizon = now + 0.12;
+    while (g.next < horizon) {
+      const step = g.step % STEPS;
+      const delay = Math.max(0, g.next - now);
+      const b = bassStep(g.bass, step);
+      if (b) this.mallet(b.midi, b.velocity, delay, 'bass');
+      for (const l of this.layers.values()) {
+        const n = voiceStep(l.rank, l.midi, step);
+        if (n) this.mallet(n.midi, n.velocity, delay, 'tine', l.pos);
+      }
+      g.step++;
+      g.next += g.stepS;
+    }
+  }
+
+  /** One groove note: a soft glass mallet, or the round bass under it. */
+  mallet(midi: number, velocity: number, delay = 0, kind: 'tine' | 'bass' = 'tine', pos?: Vec3Like): void {
+    this.record('mallet', [midi, velocity, delay, kind, v(pos)]);
+    if (!this.ctx || this.muted) return;
+    const ctx = this.ctx;
+    const t = this.now(delay);
+    const f = midiToFreq(midi);
+    const bass = kind === 'bass';
+    const len = bass ? 0.55 : 0.7;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, t);
+    out.gain.exponentialRampToValueAtTime((bass ? 0.11 : 0.065) * velocity, t + (bass ? 0.012 : 0.003));
+    out.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    if (bass) {
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 420;
+      out.connect(lp).connect(this.dry);
+    } else {
+      out.connect(this.output(pos));
+    }
+    const partials: [number, number, number][] = bass ? [[1, 1, 1], [2, 0.25, 0.5]] : [[1, 1, 1], [4.01, 0.22, 0.25], [2.76, 0.08, 0.18]];
+    for (const [ratio, amp, life] of partials) {
+      const o = ctx.createOscillator();
+      o.frequency.value = f * ratio;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(amp, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + len * life);
+      o.connect(g).connect(out);
+      o.start(t);
+      o.stop(t + len + 0.05);
+    }
+  }
+
   /** Very quiet room tone on the movement's tonic. */
   setAmbient(midi: number | null): void {
     this.record('setAmbient', [midi]);
@@ -324,7 +411,7 @@ export class AudioEngine {
     if (midi === null || this.muted) return;
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.setTargetAtTime(0.018, t, 1.5);
+    gain.gain.setTargetAtTime(0.024, t, 1.5);
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.frequency.value = 600;

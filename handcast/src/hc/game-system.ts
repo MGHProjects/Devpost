@@ -556,6 +556,7 @@ export class HandcastSystem extends createSystem({}) {
     const browsing = this.hud.section === 'menu' || this.hud.section === 'hall';
     if (!(this.mode === 'demo' && browsing)) this.hud.show(this.mode === 'studio' ? 'studio' : 'play');
     this.audio.setAmbient(this.source.tonic(level, this.levelIndex));
+    this.audio.setGroove(this.source.tonic(level, this.levelIndex), this.source.bass(level, this.levelIndex));
     this.demoT = 0;
     this.demoStep = 0;
     this.idleSince = this.time;
@@ -729,8 +730,17 @@ export class HandcastSystem extends createSystem({}) {
       if (committed !== this.committed[i]) {
         this.committed[i] = committed;
         meterDirty = true;
-        if (committed) this.audio.startSustain(i, note, this.benchPos(this.bench.worldOf('crystal', i, this.v1), this.v1));
-        else this.audio.stopSustain(i);
+        if (committed) {
+          const at = this.benchPos(this.bench.worldOf('crystal', i, this.v1), this.v1);
+          this.audio.startSustain(i, note, at);
+          // its voice in the board's song: rank by pitch, so voices interlock low to high
+          let rank = 0;
+          for (let j = 0; j < this.notes.length; j++) if (this.notes[j] < note || (this.notes[j] === note && j < i)) rank++;
+          this.audio.setLayer(i, note, rank, at);
+        } else {
+          this.audio.stopSustain(i);
+          this.audio.setLayer(i, null);
+        }
       }
     }
     if (meterDirty) {
@@ -2142,6 +2152,7 @@ export class HandcastSystem extends createSystem({}) {
       this.headUp.set(0, 1, 0);
     }
     this.audio.setListener(this.headPos, this.headFwd, this.headUp);
+    if (!this.paused) this.audio.pump();
     // The system menu pauses game time: timers and demos wait for the player.
     if (!this.paused) this.runTimers();
     if (this.gazeRestore && this.time > this.gazeRestore.at) {
