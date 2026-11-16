@@ -34,11 +34,9 @@ about ten minutes.
 
 ## Demo video
 
-**TODO:** re-cut on footage captured on a Meta Quest 3 (owner capture
-sessions, see `PRUEBA-QUEST3.md` and the video plan), under 3 minutes, every
-shot labelled "Captured on Meta Quest 3" or "Emulator". Upload to YouTube
-(public) and paste the link here. The current `media/handcast-demo.mp4` is
-emulator-only and is a fallback.
+`media/handcast-trailer-remotion.mp4`: 75 s, 1080p, real gameplay captured on a
+Meta Quest 3, edited in Remotion (`trailer/`). **TODO:** upload to YouTube
+(public) and paste the link here.
 
 ## Thumbnail and gallery
 
@@ -52,8 +50,9 @@ emulator-only and is a fallback.
 Rest your hand in a pool of light on your real table and hold still. Molten
 glass flows over your fingers and freezes into an exact copy of your pose. Slide your hand out: the glass stays, and its shape decides what it
 does to light. An open hand fans it, a flat hand on its edge mirrors it, a fist
-stops it. Light every crystal in its exact colour, keep the hush stones dark,
-and the board plays its chord. There are no mirrors to pick up. Your hand is
+stops it. Light every crystal in its exact colour and keep the hush stones dark.
+Each crystal your glass holds lit adds its own voice to a beat-locked song
+in the board's key; a solved board plays the whole arrangement. There are no mirrors to pick up. Your hand is
 the piece.
 
 **Testing instructions.** Meta Quest Browser, hand tracking on, controllers
@@ -77,13 +76,13 @@ field of view; menus answer gaze plus pinch; steady 72 Hz on Quest 3.
 **Intent and tracking loss.** A fingertip hidden from your eyes must read
 clearly straight to count; only light-carrying fingers must hold still (7 mm
 palm, 12 mm tips); the glass keeps exactly the fingers you saw; 0.25 s gap
-tolerance, Steady mode and a pause while the system menu is up. In the prologue a dead-end cast is knocked over by a ghost
-fist and refunded, so a newcomer never gets stuck.
+tolerance, Steady mode, and a pause under the system menu. In the prologue a ghost fist
+knocks over a dead-end cast and refunds it.
 
 **Content and coming back.** 49 boards in seven chapters, a Daily with a
 streak, endless Kiln boards, and a Studio where you build a board by casting
 its answer and share it to the Hall of Hands. Hint shows the light path first,
-the hand only second. Every board is a chord, synthesised live.
+the hand only second.
 
 **How we built it.** Immersive Web SDK (WebXR, three.js, ECS) and a 2D light
 tracer. Boards come from a solution-first generator and validator (solvable,
@@ -95,7 +94,7 @@ other works. Freezing the pose removes that strain and turns your hand into an
 object to move, knock over, play and share.
 
 **What's next.** Ink that stains a finger, two hands touching to fuse glass,
-and a Meta Horizon Store release as a PWA (target Q1 2027).
+and a Horizon Store PWA (target Q1 2027).
 
 ## How hand interactions are implemented (optional field)
 
@@ -185,8 +184,8 @@ For the judging criteria: Technical Implementation names hand tracking, gaze,
 passthrough, spatial anchoring and FoV-aware design; HANDCAST uses all five,
 plus plane detection and depth hit-test to find the table (all optional, with
 a hand-rest fallback for rooms the headset has not scanned). Polish names
-sound design, and every sound is synthesised live, with sounds on the bench
-placed in 3D (HRTF).
+sound design: every sound is synthesised live and placed on the bench in 3D,
+and the score is adaptive (each held crystal adds a voice to the board's groove).
 
 ## Target launch date
 

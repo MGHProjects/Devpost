@@ -131,12 +131,13 @@ export class AudioEngine {
     return buf;
   }
 
-  private output(pos?: Vec3Like): AudioNode {
+  /** `cheap`: equal-power panning instead of HRTF, for the many short groove notes. */
+  private output(pos?: Vec3Like, cheap = false): AudioNode {
     const ctx = this.ctx!;
     let node: AudioNode;
     if (pos) {
       const p = ctx.createPanner();
-      p.panningModel = 'HRTF';
+      p.panningModel = cheap ? 'equalpower' : 'HRTF';
       p.distanceModel = 'inverse';
       p.refDistance = 0.4;
       p.rolloffFactor = 0.6;
@@ -373,7 +374,7 @@ export class AudioEngine {
     const len = bass ? 0.55 : 0.7;
     const out = ctx.createGain();
     out.gain.setValueAtTime(0.0001, t);
-    out.gain.exponentialRampToValueAtTime((bass ? 0.11 : 0.065) * velocity, t + (bass ? 0.012 : 0.003));
+    out.gain.exponentialRampToValueAtTime((bass ? 0.2 : 0.14) * velocity, t + (bass ? 0.012 : 0.003));
     out.gain.exponentialRampToValueAtTime(0.0001, t + len);
     if (bass) {
       const lp = ctx.createBiquadFilter();
@@ -381,7 +382,7 @@ export class AudioEngine {
       lp.frequency.value = 420;
       out.connect(lp).connect(this.dry);
     } else {
-      out.connect(this.output(pos));
+      out.connect(this.output(pos, true));
     }
     const partials: [number, number, number][] = bass ? [[1, 1, 1], [2, 0.25, 0.5]] : [[1, 1, 1], [4.01, 0.22, 0.25], [2.76, 0.08, 0.18]];
     for (const [ratio, amp, life] of partials) {
