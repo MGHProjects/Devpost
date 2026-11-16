@@ -1,0 +1,77 @@
+# Builds Handcast (IWSDK / WebXR) and publishes it to GitHub Pages.
+# One-time setup: Settings -> Pages -> Build and deployment -> Source: "GitHub Actions".
+name: Deploy Handcast to GitHub Pages
+
+on:
+  push:
+    branches: [main, claude/clever-bell-ohs0lz]
+    paths: ['handcast/**', '.github/workflows/handcast-pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  # The competition rules: an entry "modified after the submission deadline may
+  # be disqualified", and the build must stay as submitted until winners are
+  # announced (Dec 11, 2026). So no deploy after Nov 18, 2026 12:00 PST, and none
+  # at all once the repository variable HANDCAST_FROZEN is set to 1 (set it right
+  # after the final deploy).
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse to deploy after the deadline or while frozen
+        env:
+          FROZEN: ${{ vars.HANDCAST_FROZEN }}
+        run: |
+          deadline=$(date -u -d '2026-11-18T20:00:00Z' +%s)
+          now=$(date -u +%s)
+          if [ "$now" -ge "$deadline" ]; then
+            echo "::error::Submission deadline passed (2026-11-18 12:00 PST): the live build is frozen."
+            exit 1
+          fi
+          if [ "$FROZEN" = "1" ]; then
+            echo "::error::HANDCAST_FROZEN=1: deploys are frozen. Unset the repository variable to deploy."
+            exit 1
+          fi
+
+  build:
+    needs: guard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: handcast
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: handcast/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx vitest run
+      - run: npm run build
+        env:
+          NODE_ENV: production
+          # Optional Hall of Hands backend (community/worker); unset = offline Hall.
+          VITE_HANDCAST_API: ${{ vars.VITE_HANDCAST_API }}
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: handcast/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

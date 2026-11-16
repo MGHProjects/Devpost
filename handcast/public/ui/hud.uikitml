@@ -1,0 +1,588 @@
+<!--
+  HANDCAST HUD. Sections share one panel and are toggled by src/hc/hud.ts:
+  #play (current board), #menu (puzzle select), #studio (editor), #hall (community).
+  Plain ASCII copy only (font coverage).
+
+  Dark night-studio glass: src/hc/hud.ts puts the Horizon kit in dark mode
+  (its buttons follow) and the .root div draws the glass surface (the stock
+  Horizon <Panel> keeps its own surface over class styles). 1 px is 1 mm in
+  the world (scene scale 0.1 x UIKit 0.01 m per px). Seen from a seated head
+  ~0.57-0.64 m away, 1 degree of arc is 10-11 mm, so primary text is >= 16 px (Inter
+  cap height 0.73 em = 11.6 mm). Every section is short and wide so the whole
+  panel sits between the bench crystals and the top of a 70 x 66 degree view.
+  "-hc" classes are the Large text / high contrast variants: hud.ts adds them
+  next to their base class at runtime.
+-->
+<style>
+  .root {
+    flex-direction: column;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    border-radius: 20px;
+    border-width: 1.5px;
+    border-color: rgba(143, 208, 255, 0.34);
+    background-color: rgba(3, 5, 10, 0.93);
+  }
+  .root-hc {
+    border-width: 3px;
+    border-color: #ffffff;
+    background-color: rgba(0, 0, 0, 0.97);
+  }
+  .section {
+    flex-direction: column;
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+  .fixed-w {
+    width: 640px;
+  }
+  .fixed-w-hc {
+    width: 676px;
+  }
+  .head-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .head-text {
+    flex-direction: row;
+    align-items: center;
+    flex-grow: 1;
+    flex-shrink: 1;
+    gap: 12px;
+  }
+  .eyebrow {
+    flex-grow: 1;
+    flex-shrink: 1;
+    text-align: right;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    line-height: 1.25;
+    color: #a9c6e0;
+  }
+  .eyebrow-hc {
+    font-size: 16px;
+    color: #ffffff;
+  }
+  .title {
+    flex-grow: 1;
+    flex-shrink: 1;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: #f5f7fb;
+  }
+  .title-hc {
+    font-size: 27px;
+    color: #ffffff;
+  }
+  .status {
+    margin-top: 6px;
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 1.25;
+    color: #dfe5f0;
+  }
+  .status-hc {
+    font-size: 19px;
+    font-weight: 600;
+    color: #ffffff;
+  }
+  .meter {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 5px;
+  }
+  .chip {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border-width: 2px;
+    border-color: #8fd0ff;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(143, 208, 255, 0.16);
+  }
+  .chip-hc {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+  }
+  .chip-t {
+    font-size: 15px;
+    font-weight: 800;
+    color: #8fd0ff;
+  }
+  .chip-t-hc {
+    font-size: 19px;
+  }
+  .chip-k {
+    width: 18px;
+    height: 18px;
+    color: #070a10;
+  }
+  .chip-k-hc {
+    width: 23px;
+    height: 23px;
+  }
+  .tokens {
+    flex-direction: row;
+    align-items: center;
+    gap: 5px;
+  }
+  .glass-token {
+    width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    background-color: #8fd0ff;
+    border-width: 2px;
+    border-color: #8fd0ff;
+  }
+  .glass-token-hc {
+    width: 20px;
+    height: 20px;
+    border-radius: 10px;
+    border-width: 3px;
+  }
+  .grow {
+    flex-grow: 1;
+  }
+  .row {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+  .tight {
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .tool {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .button-label {
+    font-size: 16px;
+    transform-translate-y: 1px;
+  }
+  .button-label-hc {
+    font-size: 19px;
+    font-weight: 700;
+  }
+  .wide-btn {
+    width: 136px;
+  }
+  .wide-btn-hc {
+    width: 160px;
+  }
+  .menu-body {
+    flex-direction: row;
+    gap: 22px;
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+  .menu-grid {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .menu-side {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .side-head {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .btn-col {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .btn-pair {
+    flex-direction: row;
+    gap: 6px;
+  }
+  .grid-row {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+  }
+  .movement-label {
+    flex-shrink: 0;
+    width: 92px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #a9c6e0;
+  }
+  .tour-label {
+    color: #ffd76a;
+  }
+  .movement-label-hc {
+    width: 108px;
+    font-size: 16px;
+    color: #ffffff;
+  }
+  .cell-btn {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.14);
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(255, 255, 255, 0.08);
+    cursor: pointer;
+  }
+  .cell-btn:hover {
+    border-width: 2px;
+    border-color: #8fd0ff;
+  }
+  .cell-btn-hc {
+    width: 34px;
+    height: 34px;
+    border-width: 2px;
+    border-color: #ffffff;
+  }
+  .cell-label {
+    font-size: 14px;
+    font-weight: 700;
+    color: #eef2f8;
+  }
+  .cell-label-hc {
+    font-size: 17px;
+  }
+  .hall-grid {
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .hall-pair {
+    flex-direction: row;
+    gap: 8px;
+  }
+  .hall-row {
+    flex-direction: column;
+    justify-content: center;
+    width: 296px;
+    height: 42px;
+    padding-left: 12px;
+    padding-right: 12px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.12);
+    background-color: rgba(255, 255, 255, 0.07);
+    cursor: pointer;
+  }
+  .hall-row-hc {
+    width: 334px;
+    height: 50px;
+    border-width: 2px;
+    border-color: #ffffff;
+    background-color: #10141c;
+  }
+  .hall-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f3f5fa;
+  }
+  .hall-name-hc {
+    font-size: 19px;
+    color: #ffffff;
+  }
+  .hall-meta {
+    font-size: 13px;
+    font-weight: 500;
+    color: #b9c2d6;
+  }
+  .hall-meta-hc {
+    font-size: 15px;
+    color: #ffffff;
+  }
+  .code {
+    margin-top: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #8fd0ff;
+  }
+  .code-hc {
+    font-size: 17px;
+    color: #ffffff;
+  }
+</style>
+<div id="hud-root" class="root">
+  <div id="play" class="section fixed-w">
+    <div class="head-row">
+      <div class="head-text">
+        <div id="hud-title" class="title">First Light</div>
+        <div id="hud-eyebrow" class="eyebrow">PROLOGUE - 1 / 5</div>
+      </div>
+      <div id="hud-meter" class="meter">
+        <div id="meter-0" class="chip"><div id="meter-0-t" class="chip-t">R</div><Check id="meter-0-k" class="chip-k" style="display: none"></Check></div>
+        <div id="meter-1" class="chip"><div id="meter-1-t" class="chip-t">G</div><Check id="meter-1-k" class="chip-k" style="display: none"></Check></div>
+        <div id="meter-2" class="chip"><div id="meter-2-t" class="chip-t">B</div><Check id="meter-2-k" class="chip-k" style="display: none"></Check></div>
+        <div id="meter-3" class="chip"><div id="meter-3-t" class="chip-t">W</div><Check id="meter-3-k" class="chip-k" style="display: none"></Check></div>
+        <div id="meter-4" class="chip"><div id="meter-4-t" class="chip-t">W</div><Check id="meter-4-k" class="chip-k" style="display: none"></Check></div>
+        <div id="meter-5" class="chip"><div id="meter-5-t" class="chip-t">W</div><Check id="meter-5-k" class="chip-k" style="display: none"></Check></div>
+        <div id="meter-6" class="chip"><div id="meter-6-t" class="chip-t">W</div><Check id="meter-6-k" class="chip-k" style="display: none"></Check></div>
+        <div id="meter-7" class="chip"><div id="meter-7-t" class="chip-t">W</div><Check id="meter-7-k" class="chip-k" style="display: none"></Check></div>
+      </div>
+    </div>
+    <div id="hud-status" class="status">Rest your palm in the light.</div>
+  </div>
+  <div id="play-actions" class="row">
+    <Button id="btn-undo" variant="secondary" size="sm">
+      <ButtonIcon><Undo2></Undo2></ButtonIcon>
+      <ButtonLabel class="button-label">Undo</ButtonLabel>
+    </Button>
+    <Button id="btn-reset" variant="secondary" size="sm">
+      <ButtonIcon><RotateCcw></RotateCcw></ButtonIcon>
+      <ButtonLabel class="button-label">Reset</ButtonLabel>
+    </Button>
+    <Button id="btn-hint" variant="secondary" size="sm">
+      <ButtonIcon><Lightbulb></Lightbulb></ButtonIcon>
+      <ButtonLabel class="button-label">Hint</ButtonLabel>
+    </Button>
+    <Button id="btn-menu" variant="secondary" size="sm">
+      <ButtonIcon><LayoutGrid></LayoutGrid></ButtonIcon>
+      <ButtonLabel class="button-label">Menu</ButtonLabel>
+    </Button>
+    <Button id="btn-like" size="sm" style="display: none">
+      <ButtonIcon><Heart></Heart></ButtonIcon>
+      <ButtonLabel id="btn-like-label" class="button-label">Like</ButtonLabel>
+    </Button>
+    <Button id="btn-next" size="sm">
+      <ButtonLabel class="button-label">Next</ButtonLabel>
+      <ButtonIcon><ChevronRight></ChevronRight></ButtonIcon>
+    </Button>
+    <div class="grow"></div>
+    <div id="hud-tokens" class="tokens">
+      <div id="tok-0" class="glass-token"></div>
+      <div id="tok-1" class="glass-token"></div>
+      <div id="tok-2" class="glass-token"></div>
+      <div id="tok-3" class="glass-token"></div>
+    </div>
+  </div>
+
+  <div id="menu" class="menu-body" style="display: none">
+    <div class="menu-grid">
+      <div class="grid-row">
+        <div id="tour-label" class="movement-label tour-label">TOUR</div>
+        <div id="tour-0" class="cell-btn"><div id="tour-0-t" class="cell-label">1</div></div>
+        <div id="tour-1" class="cell-btn"><div id="tour-1-t" class="cell-label">2</div></div>
+        <div id="tour-2" class="cell-btn"><div id="tour-2-t" class="cell-label">3</div></div>
+        <div id="tour-3" class="cell-btn"><div id="tour-3-t" class="cell-label">4</div></div>
+        <div id="tour-4" class="cell-btn"><div id="tour-4-t" class="cell-label">5</div></div>
+        <div id="tour-5" class="cell-btn"><div id="tour-5-t" class="cell-label">6</div></div>
+      </div>
+      <div class="grid-row">
+        <div id="ch-0-label" class="movement-label">PROLOGUE</div>
+        <div id="lvl-0" class="cell-btn"><div id="lvl-0-t" class="cell-label">1</div></div>
+        <div id="lvl-1" class="cell-btn"><div id="lvl-1-t" class="cell-label">2</div></div>
+        <div id="lvl-2" class="cell-btn"><div id="lvl-2-t" class="cell-label">3</div></div>
+        <div id="lvl-3" class="cell-btn"><div id="lvl-3-t" class="cell-label">4</div></div>
+        <div id="lvl-4" class="cell-btn"><div id="lvl-4-t" class="cell-label">5</div></div>
+      </div>
+      <div class="grid-row">
+        <div id="ch-1-label" class="movement-label">I FINGERS</div>
+        <div id="lvl-5" class="cell-btn"><div id="lvl-5-t" class="cell-label">1</div></div>
+        <div id="lvl-6" class="cell-btn"><div id="lvl-6-t" class="cell-label">2</div></div>
+        <div id="lvl-7" class="cell-btn"><div id="lvl-7-t" class="cell-label">3</div></div>
+        <div id="lvl-8" class="cell-btn"><div id="lvl-8-t" class="cell-label">4</div></div>
+        <div id="lvl-9" class="cell-btn"><div id="lvl-9-t" class="cell-label">5</div></div>
+        <div id="lvl-10" class="cell-btn"><div id="lvl-10-t" class="cell-label">6</div></div>
+        <div id="lvl-11" class="cell-btn"><div id="lvl-11-t" class="cell-label">7</div></div>
+        <div id="lvl-12" class="cell-btn"><div id="lvl-12-t" class="cell-label">8</div></div>
+      </div>
+      <div class="grid-row">
+        <div id="ch-2-label" class="movement-label">II CATCH</div>
+        <div id="lvl-13" class="cell-btn"><div id="lvl-13-t" class="cell-label">1</div></div>
+        <div id="lvl-14" class="cell-btn"><div id="lvl-14-t" class="cell-label">2</div></div>
+        <div id="lvl-15" class="cell-btn"><div id="lvl-15-t" class="cell-label">3</div></div>
+        <div id="lvl-16" class="cell-btn"><div id="lvl-16-t" class="cell-label">4</div></div>
+        <div id="lvl-17" class="cell-btn"><div id="lvl-17-t" class="cell-label">5</div></div>
+        <div id="lvl-18" class="cell-btn"><div id="lvl-18-t" class="cell-label">6</div></div>
+        <div id="lvl-19" class="cell-btn"><div id="lvl-19-t" class="cell-label">7</div></div>
+        <div id="lvl-20" class="cell-btn"><div id="lvl-20-t" class="cell-label">8</div></div>
+      </div>
+      <div class="grid-row">
+        <div id="ch-3-label" class="movement-label">III MIRROR</div>
+        <div id="lvl-21" class="cell-btn"><div id="lvl-21-t" class="cell-label">1</div></div>
+        <div id="lvl-22" class="cell-btn"><div id="lvl-22-t" class="cell-label">2</div></div>
+        <div id="lvl-23" class="cell-btn"><div id="lvl-23-t" class="cell-label">3</div></div>
+        <div id="lvl-24" class="cell-btn"><div id="lvl-24-t" class="cell-label">4</div></div>
+        <div id="lvl-25" class="cell-btn"><div id="lvl-25-t" class="cell-label">5</div></div>
+        <div id="lvl-26" class="cell-btn"><div id="lvl-26-t" class="cell-label">6</div></div>
+        <div id="lvl-27" class="cell-btn"><div id="lvl-27-t" class="cell-label">7</div></div>
+        <div id="lvl-28" class="cell-btn"><div id="lvl-28-t" class="cell-label">8</div></div>
+      </div>
+      <div class="grid-row">
+        <div id="ch-4-label" class="movement-label">IV RELAY</div>
+        <div id="lvl-29" class="cell-btn"><div id="lvl-29-t" class="cell-label">1</div></div>
+        <div id="lvl-30" class="cell-btn"><div id="lvl-30-t" class="cell-label">2</div></div>
+        <div id="lvl-31" class="cell-btn"><div id="lvl-31-t" class="cell-label">3</div></div>
+        <div id="lvl-32" class="cell-btn"><div id="lvl-32-t" class="cell-label">4</div></div>
+        <div id="lvl-33" class="cell-btn"><div id="lvl-33-t" class="cell-label">5</div></div>
+        <div id="lvl-34" class="cell-btn"><div id="lvl-34-t" class="cell-label">6</div></div>
+        <div id="lvl-35" class="cell-btn"><div id="lvl-35-t" class="cell-label">7</div></div>
+        <div id="lvl-36" class="cell-btn"><div id="lvl-36-t" class="cell-label">8</div></div>
+      </div>
+      <div class="grid-row">
+        <div id="ch-5-label" class="movement-label">V COLOUR</div>
+        <div id="lvl-37" class="cell-btn"><div id="lvl-37-t" class="cell-label">1</div></div>
+        <div id="lvl-38" class="cell-btn"><div id="lvl-38-t" class="cell-label">2</div></div>
+        <div id="lvl-39" class="cell-btn"><div id="lvl-39-t" class="cell-label">3</div></div>
+        <div id="lvl-40" class="cell-btn"><div id="lvl-40-t" class="cell-label">4</div></div>
+        <div id="lvl-41" class="cell-btn"><div id="lvl-41-t" class="cell-label">5</div></div>
+        <div id="lvl-42" class="cell-btn"><div id="lvl-42-t" class="cell-label">6</div></div>
+        <div id="lvl-43" class="cell-btn"><div id="lvl-43-t" class="cell-label">7</div></div>
+        <div id="lvl-44" class="cell-btn"><div id="lvl-44-t" class="cell-label">8</div></div>
+      </div>
+      <div class="grid-row">
+        <div id="ch-6-label" class="movement-label">FINALE</div>
+        <div id="lvl-45" class="cell-btn"><div id="lvl-45-t" class="cell-label">1</div></div>
+        <div id="lvl-46" class="cell-btn"><div id="lvl-46-t" class="cell-label">2</div></div>
+        <div id="lvl-47" class="cell-btn"><div id="lvl-47-t" class="cell-label">3</div></div>
+        <div id="lvl-48" class="cell-btn"><div id="lvl-48-t" class="cell-label">4</div></div>
+      </div>
+    </div>
+    <div class="menu-side">
+      <div class="side-head">
+        <div class="title">Choose a board</div>
+        <Button id="btn-back" variant="secondary" size="sm">
+          <ButtonLabel class="button-label">Back</ButtonLabel>
+        </Button>
+      </div>
+      <div id="menu-actions" class="btn-col">
+        <div class="btn-pair">
+          <Button id="btn-daily" class="wide-btn" size="sm">
+            <ButtonIcon><CalendarDays></CalendarDays></ButtonIcon>
+            <ButtonLabel id="btn-daily-label" class="button-label">Daily</ButtonLabel>
+          </Button>
+          <Button id="btn-kiln" class="wide-btn" variant="secondary" size="sm">
+            <ButtonIcon><Flame></Flame></ButtonIcon>
+            <ButtonLabel class="button-label">Kiln</ButtonLabel>
+          </Button>
+        </div>
+        <div class="btn-pair">
+          <Button id="btn-studio" class="wide-btn" variant="secondary" size="sm">
+            <ButtonIcon><Hand></Hand></ButtonIcon>
+            <ButtonLabel class="button-label">Studio</ButtonLabel>
+          </Button>
+          <Button id="btn-hall" class="wide-btn" variant="secondary" size="sm">
+            <ButtonIcon><Users></Users></ButtonIcon>
+            <ButtonLabel class="button-label">Hall</ButtonLabel>
+          </Button>
+        </div>
+      </div>
+      <div id="menu-actions-2" class="btn-col">
+        <div class="btn-pair">
+          <Button id="btn-sound" class="wide-btn" variant="secondary" size="sm">
+            <ButtonIcon><Volume2></Volume2></ButtonIcon>
+            <ButtonLabel id="btn-sound-label" class="button-label">Sound</ButtonLabel>
+          </Button>
+          <Button id="btn-assist" class="wide-btn" variant="secondary" size="sm">
+            <ButtonIcon><Accessibility></Accessibility></ButtonIcon>
+            <ButtonLabel id="btn-assist-label" class="button-label">Steady</ButtonLabel>
+          </Button>
+        </div>
+        <div class="btn-pair">
+          <Button id="btn-recenter" class="wide-btn" variant="secondary" size="sm">
+            <ButtonIcon><Move></Move></ButtonIcon>
+            <ButtonLabel class="button-label">Table</ButtonLabel>
+          </Button>
+          <Button id="btn-contrast" class="wide-btn" variant="secondary" size="sm">
+            <ButtonIcon><Contrast></Contrast></ButtonIcon>
+            <ButtonLabel id="btn-contrast-label" class="button-label">Large text</ButtonLabel>
+          </Button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="studio" class="section fixed-w" style="display: none">
+    <div class="head-text">
+      <div class="title">Make a board</div>
+      <div class="eyebrow">STUDIO</div>
+    </div>
+    <div id="studio-status" class="status">Cast a hand in the light, then drop crystals where it shines.</div>
+    <div id="studio-code" class="code"></div>
+  </div>
+  <div id="studio-tools" class="row tight" style="display: none">
+    <Button id="tool-lamp" class="tool" variant="secondary" size="sm"><ButtonLabel id="tool-lamp-t" class="button-label">Lamp</ButtonLabel></Button>
+    <Button id="tool-well" class="tool" variant="secondary" size="sm"><ButtonLabel id="tool-well-t" class="button-label">Pool</ButtonLabel></Button>
+    <Button id="tool-hush" class="tool" variant="secondary" size="sm"><ButtonLabel id="tool-hush-t" class="button-label">Hush</ButtonLabel></Button>
+    <Button id="tool-wall" class="tool" variant="secondary" size="sm"><ButtonLabel id="tool-wall-t" class="button-label">Wall</ButtonLabel></Button>
+    <Button id="tool-erase" class="tool" variant="secondary" size="sm"><ButtonLabel id="tool-erase-t" class="button-label">Erase</ButtonLabel></Button>
+  </div>
+  <div id="studio-actions" class="row tight" style="display: none">
+    <Button id="btn-studio-undo" variant="secondary" size="sm">
+      <ButtonIcon><Undo2></Undo2></ButtonIcon>
+      <ButtonLabel class="button-label">Undo</ButtonLabel>
+    </Button>
+    <Button id="btn-drop" size="sm">
+      <ButtonIcon><Sparkles></Sparkles></ButtonIcon>
+      <ButtonLabel class="button-label">Crystals</ButtonLabel>
+    </Button>
+    <Button id="btn-publish" variant="secondary" size="sm">
+      <ButtonIcon><Share2></Share2></ButtonIcon>
+      <ButtonLabel class="button-label">Publish</ButtonLabel>
+    </Button>
+    <Button id="btn-studio-exit" variant="secondary" size="sm">
+      <ButtonLabel class="button-label">Done</ButtonLabel>
+    </Button>
+  </div>
+
+  <div id="hall" class="section" style="display: none">
+    <div class="head-text">
+      <div id="hall-title" class="title">Featured</div>
+      <div class="eyebrow">HALL OF HANDS</div>
+    </div>
+    <div class="hall-grid">
+      <div class="hall-pair">
+        <div id="hall-0" class="hall-row">
+          <div id="hall-0-name" class="hall-name">-</div>
+          <div id="hall-0-meta" class="hall-meta"></div>
+        </div>
+        <div id="hall-1" class="hall-row">
+          <div id="hall-1-name" class="hall-name">-</div>
+          <div id="hall-1-meta" class="hall-meta"></div>
+        </div>
+      </div>
+      <div class="hall-pair">
+        <div id="hall-2" class="hall-row">
+          <div id="hall-2-name" class="hall-name">-</div>
+          <div id="hall-2-meta" class="hall-meta"></div>
+        </div>
+        <div id="hall-3" class="hall-row">
+          <div id="hall-3-name" class="hall-name">-</div>
+          <div id="hall-3-meta" class="hall-meta"></div>
+        </div>
+      </div>
+      <div class="hall-pair">
+        <div id="hall-4" class="hall-row">
+          <div id="hall-4-name" class="hall-name">-</div>
+          <div id="hall-4-meta" class="hall-meta"></div>
+        </div>
+        <div id="hall-5" class="hall-row">
+          <div id="hall-5-name" class="hall-name">-</div>
+          <div id="hall-5-meta" class="hall-meta"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="hall-actions" class="row" style="display: none">
+    <Button id="hall-featured" variant="secondary" size="sm"><ButtonLabel class="button-label">Featured</ButtonLabel></Button>
+    <Button id="hall-new" variant="secondary" size="sm"><ButtonLabel class="button-label">New</ButtonLabel></Button>
+    <Button id="hall-top" variant="secondary" size="sm"><ButtonLabel class="button-label">Top</ButtonLabel></Button>
+    <Button id="hall-back" variant="secondary" size="sm"><ButtonLabel class="button-label">Back</ButtonLabel></Button>
+  </div>
+</div>

@@ -1,0 +1,22 @@
+{
+  "name": "handcast-trailer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render Trailer out/trailer.mp4",
+    "still": "remotion still"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.544",
+    "@remotion/google-fonts": "4.0.544",
+    "@remotion/transitions": "4.0.544",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "remotion": "4.0.544"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.12",
+    "typescript": "5.9.2"
+  }
+}
